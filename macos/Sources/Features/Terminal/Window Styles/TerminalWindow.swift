@@ -195,6 +195,14 @@ class TerminalWindow: NSWindow {
     override func close() {
         tabTitleEditor.finishEditing(commit: true)
         NotificationCenter.default.post(name: Self.terminalWillCloseNotification, object: self)
+
+        // Closing the selected tab makes AppKit select a neighboring tab,
+        // which may belong to another workspace. Let the workspace pick the
+        // next tab first.
+        if let terminalController {
+            terminalController.workspaceGroup?.tabWillClose(terminalController)
+        }
+
         super.close()
     }
 
@@ -246,8 +254,10 @@ class TerminalWindow: NSWindow {
         super.mergeAllWindows(sender)
 
         // It takes an event loop cycle to merge all the windows so we set a
-        // short timer to relabel the tabs (issue #1902)
+        // short timer to relabel the tabs (issue #1902). The merged tabs
+        // bring their own workspace groups, which must merge too.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.terminalController?.reconcileWorkspaces()
             self?.terminalController?.relabelTabs()
         }
     }

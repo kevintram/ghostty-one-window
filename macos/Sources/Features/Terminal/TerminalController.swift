@@ -61,6 +61,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// The notification cancellable for focused surface property changes.
     private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
 
+    /// The workspace this tab belongs to. See TerminalController+Workspace.
+    let workspaceMembership = WorkspaceMembership()
+
     init(_ ghostty: Ghostty.App,
          withBaseConfig base: Ghostty.SurfaceConfiguration? = nil,
          withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
@@ -587,8 +590,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // otherwise the accessory view doesn't matter.
         tabListenForFrame = window?.tabbedWindows?.count ?? 0 > 1
 
-        if let windows = window?.tabbedWindows as? [TerminalWindow] {
-            for (tab, window) in zip(1..., windows) {
+        // Workspaces share one native tab group, so each workspace's tabs
+        // are numbered separately.
+        let tabLists: [[NSWindow]] = workspaceGroup.map { group in
+            group.workspaces.map { group.windows(in: $0.id) }
+        } ?? [window?.tabbedWindows ?? []]
+
+        for windows in tabLists {
+            for (tab, window) in zip(1..., windows.compactMap { $0 as? TerminalWindow }) {
                 // We need to clear any windows beyond this because they have had
                 // a keyEquivalent set previously.
                 guard tab <= 9 else {
@@ -603,6 +612,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                 }
             }
         }
+
+        workspaceGroup?.refreshTabs()
     }
 
     private func fixTabBar() {
@@ -746,8 +757,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     private func closeOtherTabsImmediately() {
         guard let window = window else { return }
-        guard let tabGroup = window.tabGroup else { return }
-        guard tabGroup.windows.count > 1 else { return }
+        let tabs = workspaceTabs
+        guard tabs.count > 1 else { return }
 
         // Start an undo grouping
         if let undoManager {
@@ -758,7 +769,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // Iterate through all tabs except the current one.
-        for window in tabGroup.windows where window != self.window {
+        for window in tabs where window != self.window {
             // We ignore any non-terminal tabs. They don't currently exist and we can't
             // properly undo them anyways so I'd rather ignore them and get a bug report
             // later if and when we introduce non-terminal tabs.
@@ -795,10 +806,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     private func closeTabsOnTheRightImmediately() {
         guard let window = window else { return }
-        guard let tabGroup = window.tabGroup else { return }
-        guard let currentIndex = tabGroup.windows.firstIndex(of: window) else { return }
+        let tabs = workspaceTabs
+        guard let currentIndex = tabs.firstIndex(of: window) else { return }
 
-        let tabsToClose = tabGroup.windows.enumerated().filter { $0.offset > currentIndex }
+        let tabsToClose = tabs.enumerated().filter { $0.offset > currentIndex }
         guard !tabsToClose.isEmpty else { return }
 
         undoManager?.beginUndoGrouping()
@@ -942,10 +953,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             // then we can't restore tabs.
             guard let firstController = controllers.first else { return }
 
-            // Add all subsequent controllers as tabs to the first window
+            // Add all subsequent controllers as tabs to the first window. Windows
+            // that can't be tabs under the current config stay separate.
             for controller in controllers.dropFirst() {
                 controller.showWindow(nil)
-                if let firstWindow = firstController.window,
+                if firstController.supportsWorkspaces, controller.supportsWorkspaces,
+                   let firstWindow = firstController.window,
                    let newWindow = controller.window {
                     firstWindow.addTabbedWindowSafely(newWindow, ordered: .above)
                 }
@@ -1017,10 +1030,15 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         let tabIndex: Int?
         weak var tabGroup: NSWindowTabGroup?
         let tabColor: TerminalTabColor
+        let workspace: WorkspaceUndoState?
     }
 
     convenience init(_ ghostty: Ghostty.App, with undoState: UndoState) {
         self.init(ghostty, withSurfaceTree: undoState.surfaceTree)
+
+        // Rejoin the original workspace before showing, so the tab never
+        // gets a workspace of its own while it's briefly on its own.
+        restoreWorkspace(undoState.workspace)
 
         // Show the window and restore its frame
         showWindow(nil)
@@ -1030,8 +1048,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                 terminalWindow.tabColor = undoState.tabColor
             }
 
-            // If we have a tab group and index, restore the tab to its original position
-            if let tabGroup = undoState.tabGroup,
+            // If we have a tab group and index, restore the tab to its original position.
+            // The window's style follows the current config; one that can't be a tab
+            // (hidden titlebar) stays its own window, like a new tab would.
+            if supportsWorkspaces,
+               let tabGroup = undoState.tabGroup,
                let tabIndex = undoState.tabIndex {
                 if tabIndex < tabGroup.windows.count {
                     // Find the window that is currently at that index
@@ -1072,7 +1093,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             focusedSurface: focusedSurface?.id,
             tabIndex: window.tabGroup?.windows.firstIndex(of: window),
             tabGroup: window.tabGroup,
-            tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
+            tabColor: (window as? TerminalWindow)?.tabColor ?? .none,
+            workspace: workspaceUndoState)
     }
 
     // MARK: - NSWindowController
@@ -1194,6 +1216,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         super.showWindow(sender)
 
+        // New windows and tabs join a workspace as soon as they're shown,
+        // even if they never become key (e.g. the app isn't active).
+        scheduleWorkspaceReconcile()
+
         syncAppearance()
     }
 
@@ -1227,7 +1253,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     override func windowWillClose(_ notification: Notification) {
         super.windowWillClose(notification)
         cancelPendingInitialPresentation()
-        self.relabelTabs()
+
+        // This tab leaves its workspace here, after which it would number the
+        // whole native tab group. Relabel through a tab that stays instead.
+        let remainingTab = workspaceGroup?.controllers.first { $0 !== self }
+        workspaceGroup?.controllerWillClose(self)
+        (remainingTab ?? self).relabelTabs()
 
         // If we remove a window, we reset the cascade point to the key window so that
         // the next window cascade's from that one.
@@ -1261,6 +1292,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     override func windowDidBecomeKey(_ notification: Notification) {
         super.windowDidBecomeKey(notification)
+        workspaceGroup?.tabDidBecomeKey(self)
+        scheduleWorkspaceReconcile()
         self.relabelTabs()
         self.fixTabBar()
     }
@@ -1337,14 +1370,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     @IBAction func closeOtherTabs(_ sender: Any?) {
-        guard let window = window else { return }
-        guard let tabGroup = window.tabGroup else { return }
+        let tabs = workspaceTabs
 
         // If we only have one window then we have no other tabs to close
-        guard tabGroup.windows.count > 1 else { return }
+        guard tabs.count > 1 else { return }
 
         // Check if we have to confirm close.
-        guard tabGroup.windows.contains(where: { window in
+        guard tabs.contains(where: { window in
             // Ignore ourself
             if window == self.window { return false }
 
@@ -1370,10 +1402,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     @IBAction func closeTabsOnTheRight(_ sender: Any?) {
         guard let window = window else { return }
-        guard let tabGroup = window.tabGroup else { return }
-        guard let currentIndex = tabGroup.windows.firstIndex(of: window) else { return }
+        let tabs = workspaceTabs
+        guard let currentIndex = tabs.firstIndex(of: window) else { return }
 
-        let tabsToClose = tabGroup.windows.enumerated().filter { $0.offset > currentIndex }
+        let tabsToClose = tabs.enumerated().filter { $0.offset > currentIndex }
         guard !tabsToClose.isEmpty else { return }
 
         let needsConfirm = tabsToClose.contains { (_, candidate) in
@@ -1552,7 +1584,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         guard let windowController = window.windowController else { return }
         guard let tabGroup = windowController.window?.tabGroup else { return }
         guard let selectedWindow = tabGroup.selectedWindow else { return }
-        let tabbedWindows = tabGroup.windows
+        let tabbedWindows = workspaceTabs
         guard tabbedWindows.count > 0 else { return }
         guard let selectedIndex = tabbedWindows.firstIndex(where: { $0 == selectedWindow }) else { return }
 
@@ -1614,7 +1646,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         guard let windowController = window.windowController else { return }
         guard let tabGroup = windowController.window?.tabGroup else { return }
-        let tabbedWindows = tabGroup.windows
+        let tabbedWindows = workspaceTabs
 
         // This will be the index we want to actual go to
         let finalIndex: Int
@@ -1735,9 +1767,13 @@ extension TerminalController {
     override func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(closeTabsOnTheRight):
-            guard let window, let tabGroup = window.tabGroup else { return false }
-            guard let currentIndex = tabGroup.windows.firstIndex(of: window) else { return false }
-            return tabGroup.windows.indices.contains { $0 > currentIndex }
+            guard let window else { return false }
+            let tabs = workspaceTabs
+            guard let currentIndex = tabs.firstIndex(of: window) else { return false }
+            return tabs.indices.contains { $0 > currentIndex }
+
+        case #selector(newWorkspace), #selector(selectNextWorkspace), #selector(selectPreviousWorkspace):
+            return workspaceGroup != nil
 
         case #selector(returnToDefaultSize):
             guard let window else { return false }

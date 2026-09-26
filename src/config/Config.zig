@@ -7149,10 +7149,11 @@ pub const Keybinds = struct {
                 .{ .jump_to_prompt = 1 },
             );
 
-            // Mac windowing
+            // Mac windowing. Cmd+N is left unbound for the workspace
+            // menu's "New Workspace" item.
             try self.set.put(
                 alloc,
-                .{ .key = .{ .unicode = 'n' }, .mods = .{ .super = true } },
+                .{ .key = .{ .unicode = 'n' }, .mods = .{ .super = true, .shift = true } },
                 .{ .new_window = {} },
             );
             try self.set.put(
