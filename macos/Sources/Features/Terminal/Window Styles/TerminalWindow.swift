@@ -270,6 +270,13 @@ class TerminalWindow: NSWindow {
         // it. This has been verified to work on macOS 12 to 26
         if isTabBar(childViewController) {
             childViewController.identifier = Self.tabBarIdentifier
+
+            // The tab group holds the tabs of every workspace, so the
+            // native tab bar would show them all. Workspaces draw their own
+            // tab strip instead. Hiding the accessory also collapses its
+            // space in the titlebar.
+            childViewController.isHidden = true
+
             tabBarDidAppear()
         }
     }

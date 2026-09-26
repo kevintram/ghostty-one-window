@@ -1140,7 +1140,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // SwiftUI focus chain.
         container.initialContentSize = focusedSurface?.initialSize
 
-        window.contentView = container
+        // The workspace sidebar wraps the terminal. It needs a full-size
+        // content view so AppKit can extend the sidebar under the titlebar.
+        if supportsWorkspaces {
+            window.styleMask.insert(.fullSizeContentView)
+            window.contentViewController = WorkspaceSplitViewController(
+                membership: workspaceMembership,
+                terminalContainer: container)
+        } else {
+            window.contentView = container
+        }
 
         // If we have a default size, we want to apply it.
         if let defaultSize {
