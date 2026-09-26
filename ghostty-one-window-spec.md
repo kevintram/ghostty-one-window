@@ -148,9 +148,17 @@ The workspace bar should use standard macOS appearance and interaction
 patterns. It is stable application chrome: switching tabs or workspaces must
 not visibly recreate, move, resize, or reset it.
 
-The workspace bar can be shown or hidden. Its width, visibility, selection,
-and ordering belong to the `WorkspaceWindowGroup`, not to an individual tab or
-workspace.
+The workspace bar can be shown or hidden with View → Hide/Show Sidebar
+(`Command-B`) or a sidebar button in the titlebar beside the window buttons,
+which stays in place while the sidebar is collapsed. Collapsing animates in
+the visible tab; the terminal column takes the freed width and the window
+keeps its frame. The sidebar never collapses on its own when the window is
+resized narrow.
+
+Its width, visibility, selection, and ordering belong to the
+`WorkspaceWindowGroup`, not to an individual tab or workspace: every tab
+window of the group follows the group's collapsed state, applying it
+instantly in hidden tabs so switching tabs never animates.
 
 ### 6.2 Workspace selection
 
@@ -212,7 +220,7 @@ The default commands are:
 | New Workspace | `Command-N` | Create and select a workspace containing one new tab. |
 | Close Tab | `Command-W` | Close the active tab using Ghostty's existing confirmation behavior. The next tab is chosen within the same workspace. |
 | Close Window | `Command-Shift-W` | Close the application window, including every workspace in it. |
-| Toggle Sidebar | `Command-B` | Show or hide the workspace sidebar. |
+| Hide/Show Sidebar | `Command-B` | Show or hide the workspace sidebar (View menu, titlebar button). |
 | Next Tab | `Command-Shift-]` | Select the next tab within the current workspace. |
 | Previous Tab | `Command-Shift-[` | Select the previous tab within the current workspace. |
 | Go to Tab 1–9 | `Command-1` … `Command-9` | Select the Nth tab of the current workspace. |
@@ -467,6 +475,13 @@ The window uses a full-size content view so the sidebar extends under the
 titlebar. Ghostty's existing terminal view remains intact inside its
 container.
 
+With a glass background, the terminal's glass covers the whole window and
+overhangs its edges, so its rim is clipped by the window rather than drawn
+inside it. The titlebar draws no background over the terminal column (the
+split view's per-column titlebar backgrounds are made transparent), so the
+title row is part of the same glass surface. The sidebar keeps its native
+material.
+
 Workspaces require native tabbing. Windows that disallow tabbing (for
 example `macos-titlebar-style = hidden`) keep Ghostty's plain terminal
 layout with no sidebar or tab strip, and the workspace commands are disabled
@@ -641,13 +656,15 @@ Implemented:
   New Window splits the tab into its own workspace group.
 - New Workspace rolls back (closing the new terminal) if its tab cannot join
   the tab group, and is unavailable for windows that disallow tabbing.
+- Collapsible sidebar: View → Hide/Show Sidebar (`Command-B`) and a titlebar
+  sidebar button; state shared by the window group, not persisted.
 
 Not yet implemented:
 
 - Workspace rename, reorder, and close (with all-or-cancel confirmation).
 - Moving tabs between workspaces; tab drag-to-reorder; dragging tabs out.
 - Tab context menu, tab colors, and bell indicators in the tab strip.
-- Toggle Sidebar and adjustable sidebar width.
+- Adjustable sidebar width.
 - Workspace commands as Ghostty actions.
 - State restoration of workspaces.
 - AppKit's Window-menu Show Next/Previous Tab and Show All Tabs, which still

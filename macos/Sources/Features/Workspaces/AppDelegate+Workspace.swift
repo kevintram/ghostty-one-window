@@ -50,5 +50,15 @@ extension AppDelegate {
             mainMenu.items.firstIndex { $0.submenu === windowsMenu }
         } ?? mainMenu.items.count
         mainMenu.insertItem(item, at: index)
+
+        // Hide/Show Sidebar in the View menu, handled by the key window's
+        // workspace split view (NSSplitViewController's standard action).
+        if let viewMenu = mainMenu.items.first(where: { $0.title == "View" })?.submenu {
+            viewMenu.addItem(.separator())
+            viewMenu.addItem(
+                withTitle: "Hide Sidebar",
+                action: #selector(NSSplitViewController.toggleSidebar(_:)),
+                keyEquivalent: "b")
+        }
     }
 }

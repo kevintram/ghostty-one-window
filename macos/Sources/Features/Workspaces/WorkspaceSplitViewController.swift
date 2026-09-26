@@ -12,6 +12,14 @@ final class WorkspaceSplitViewController: NSSplitViewController {
     let terminalContainer: TerminalViewContainer
     private let membership: WorkspaceMembership
     private var tabStripVisibility: AnyCancellable?
+    private var sidebarCollapse: AnyCancellable?
+
+    /// Whether this window has applied its group's sidebar state yet. The
+    /// first time isn't animated, e.g. a new tab opening while the sidebar
+    /// is collapsed.
+    private var appliedSidebarState = false
+
+    private var sidebarItem: NSSplitViewItem? { splitViewItems.first }
 
     init(membership: WorkspaceMembership, terminalContainer: TerminalViewContainer) {
         self.membership = membership
@@ -41,11 +49,23 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         // Don't let SwiftUI's ideal size drive the window size.
         sidebarController.sizingOptions = []
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController)
-        sidebar.canCollapse = false
+        sidebar.canCollapse = true
+        // Only collapse when asked, not when the window gets narrow. Must come
+        // after `canCollapse`, which resets it for sidebars.
+        sidebar.canCollapseFromWindowResize = false
         sidebar.allowsFullHeightLayout = true
         sidebar.minimumThickness = WorkspaceWindowGroup.sidebarWidth
         sidebar.maximumThickness = WorkspaceWindowGroup.sidebarWidth
         addSplitViewItem(sidebar)
+
+        // Every tab window of the group follows the group's collapsed state.
+        sidebarCollapse = membership.$group
+            .compactMap { $0?.$isSidebarCollapsed }
+            .switchToLatest()
+            .removeDuplicates()
+            .sink { [weak self] collapsed in
+                MainActor.assumeIsolated { self?.applySidebarState(collapsed: collapsed) }
+            }
 
         // The terminal column extends under the titlebar, so pin our tab
         // strip below its safe area and the terminal below the strip.
@@ -83,6 +103,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         if let splitView = splitView as? WorkspaceSplitView {
             splitView.terminalContainer = terminalContainer
             splitView.tabStripHeight = tabStripHeight
+            splitView.sidebarItem = sidebar
         }
 
         NSLayoutConstraint.activate([
@@ -97,6 +118,96 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         ])
         addSplitViewItem(NSSplitViewItem(viewController: detail))
     }
+
+    // MARK: Sidebar
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        installSidebarToggleButton()
+    }
+
+    /// Collapsing is shared by the group, so the standard action (View menu,
+    /// ⌘B, the titlebar button) toggles the group's state rather than just
+    /// this window's sidebar.
+    override func toggleSidebar(_ sender: Any?) {
+        guard let group = membership.group else {
+            super.toggleSidebar(sender)
+            return
+        }
+        group.toggleSidebar()
+    }
+
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(toggleSidebar(_:)), let menuItem = item as? NSMenuItem {
+            menuItem.title = sidebarItem?.isCollapsed ?? false ? "Show Sidebar" : "Hide Sidebar"
+            return true
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    /// Animates only in the key window, the tab being toggled; other tabs
+    /// (and a window's first state) change instantly so switching tabs
+    /// never animates.
+    private func applySidebarState(collapsed: Bool) {
+        defer { appliedSidebarState = true }
+        guard let sidebarItem, sidebarItem.isCollapsed != collapsed else { return }
+
+        if appliedSidebarState, view.window?.isKeyWindow == true {
+            sidebarItem.animator().isCollapsed = collapsed
+        } else {
+            sidebarItem.isCollapsed = collapsed
+        }
+    }
+
+    /// A Liquid Glass sidebar button beside the window buttons, like Finder's.
+    /// It's a titlebar accessory, so it stays put while the sidebar collapses.
+    private func installSidebarToggleButton() {
+        // Accessing titlebar accessories without a titlebar crashes, e.g.
+        // while non-native fullscreen has removed it.
+        guard let window = view.window, window.styleMask.contains(.titled),
+              !window.titlebarAccessoryViewControllers.contains(where: { $0.identifier == Self.sidebarToggleIdentifier })
+        else { return }
+
+        let button = NSHostingView(rootView: SidebarToggleButton { [weak self] in
+            self?.toggleSidebar(nil)
+        })
+        button.frame = NSRect(x: 0, y: 0, width: 44, height: 28)
+
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.identifier = Self.sidebarToggleIdentifier
+        accessory.layoutAttribute = .left
+        accessory.view = button
+        window.addTitlebarAccessoryViewController(accessory)
+    }
+
+    private static let sidebarToggleIdentifier = NSUserInterfaceItemIdentifier("workspaceSidebarToggle")
+}
+
+private struct SidebarToggleButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        glass(Button(action: action) {
+            Image(systemName: "sidebar.left")
+                .frame(width: 16, height: 16)
+        })
+        .help("Hide or Show Sidebar")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// A circular Liquid Glass button, or a borderless one before macOS 26.
+    @ViewBuilder
+    private func glass(_ button: some View) -> some View {
+#if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            button.buttonStyle(.glass).buttonBorderShape(.circle)
+        } else {
+            button.buttonStyle(.borderless)
+        }
+#else
+        button.buttonStyle(.borderless)
+#endif
+    }
 }
 
 /// Reports the terminal's intrinsic size plus the sidebar, titlebar and tab
@@ -104,6 +215,28 @@ final class WorkspaceSplitViewController: NSSplitViewController {
 private final class WorkspaceSplitView: NSSplitView {
     weak var terminalContainer: TerminalViewContainer?
     weak var tabStripHeight: NSLayoutConstraint?
+    weak var sidebarItem: NSSplitViewItem?
+
+    // AppKit gives each split view column its own titlebar background, with
+    // macOS 26's scroll edge effect, drawn as an opaque band (and separator)
+    // across the title row. Make them transparent so the title row shows the
+    // window's glass. Ghostty's own titlebar transparency only reaches the
+    // titlebar container, not these. AppKit adds them after the first layout
+    // and manages their `isHidden` itself, so use their alpha instead.
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        hideIfTitlebarBackground(subview)
+    }
+
+    override func layout() {
+        super.layout()
+        subviews.forEach(hideIfTitlebarBackground)
+    }
+
+    private func hideIfTitlebarBackground(_ view: NSView) {
+        if view.className == "NSTitlebarBackgroundView" { view.alphaValue = 0 }
+    }
 
     override var intrinsicContentSize: NSSize {
         guard let size = terminalContainer?.intrinsicContentSize,
@@ -112,7 +245,7 @@ private final class WorkspaceSplitView: NSSplitView {
         }
 
         return NSSize(
-            width: size.width + dividerThickness + WorkspaceWindowGroup.sidebarWidth,
+            width: size.width + (sidebarItem?.isCollapsed ?? false ? 0 : dividerThickness + WorkspaceWindowGroup.sidebarWidth),
             height: size.height + safeAreaInsets.top + (tabStripHeight?.constant ?? 0))
     }
 }

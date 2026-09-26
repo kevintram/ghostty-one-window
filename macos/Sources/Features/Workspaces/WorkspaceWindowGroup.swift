@@ -44,6 +44,10 @@ final class WorkspaceWindowGroup: ObservableObject {
     /// The selected workspace's tabs in native tab group order.
     @Published private(set) var tabs: [Tab] = []
 
+    /// Whether the workspace sidebar is collapsed. Shared by every tab window
+    /// of the group so switching tabs doesn't bring it back.
+    @Published private(set) var isSidebarCollapsed = false
+
     /// The last selected tab of each workspace, reselected when switching
     /// back to it.
     private var lastSelectedTab: [UUID: Weak<NSWindow>] = [:]
@@ -109,6 +113,10 @@ final class WorkspaceWindowGroup: ObservableObject {
         selectedID = id
         selectTab(target)
         refreshTabs()
+    }
+
+    func toggleSidebar() {
+        isSidebarCollapsed.toggle()
     }
 
     /// Selects the workspace `offset` positions away, wrapping around.

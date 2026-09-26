@@ -954,12 +954,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             guard let firstController = controllers.first else { return }
 
             // Add all subsequent controllers as tabs to the first window. Windows
-            // that can't be tabs under the current config stay separate.
+            // whose style (from the current config) differs stay separate.
             for controller in controllers.dropFirst() {
                 controller.showWindow(nil)
-                if firstController.supportsWorkspaces, controller.supportsWorkspaces,
-                   let firstWindow = firstController.window,
-                   let newWindow = controller.window {
+                if let firstWindow = firstController.window,
+                   let newWindow = controller.window,
+                   controller.canShareTabGroup(with: firstWindow) {
                     firstWindow.addTabbedWindowSafely(newWindow, ordered: .above)
                 }
             }
@@ -1049,11 +1049,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             }
 
             // If we have a tab group and index, restore the tab to its original position.
-            // The window's style follows the current config; one that can't be a tab
-            // (hidden titlebar) stays its own window, like a new tab would.
-            if supportsWorkspaces,
-               let tabGroup = undoState.tabGroup,
-               let tabIndex = undoState.tabIndex {
+            // The window's style follows the current config; if it no longer matches
+            // the group's (e.g. now a hidden titlebar), it stays its own window.
+            if let tabGroup = undoState.tabGroup,
+               let tabIndex = undoState.tabIndex,
+               let groupWindow = tabGroup.windows.first,
+               canShareTabGroup(with: groupWindow) {
                 if tabIndex < tabGroup.windows.count {
                     // Find the window that is currently at that index
                     let currentWindow = tabGroup.windows[tabIndex]
@@ -1142,7 +1143,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // The workspace sidebar wraps the terminal. It needs a full-size
         // content view so AppKit can extend the sidebar under the titlebar.
-        if supportsWorkspaces {
+        if canHostWorkspaces {
             window.styleMask.insert(.fullSizeContentView)
             window.contentViewController = WorkspaceSplitViewController(
                 membership: workspaceMembership,
@@ -1226,7 +1227,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         super.showWindow(sender)
 
         // New windows and tabs join a workspace as soon as they're shown,
-        // even if they never become key (e.g. the app isn't active).
+        // even if they never become key (e.g. the app isn't active). An
+        // unassigned window joins now so its sidebar is right on the first
+        // frame; an assigned one (undo) is reconciled after it's been put
+        // back in its tab group.
+        if workspaceGroup == nil { reconcileWorkspaces() }
         scheduleWorkspaceReconcile()
 
         syncAppearance()

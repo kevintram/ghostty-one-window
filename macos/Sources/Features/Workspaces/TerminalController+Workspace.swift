@@ -4,12 +4,32 @@ extension TerminalController {
     var workspaceGroup: WorkspaceWindowGroup? { workspaceMembership.group }
     var workspaceID: UUID? { workspaceMembership.workspaceID }
 
-    /// Whether this tab can use workspaces. Workspaces are tabs of one
-    /// native tab group, so windows that never tab (hidden titlebar) can't.
-    /// Decided by window class rather than `tabbingMode`, which is briefly
-    /// `.automatic` for those windows after they load.
+    /// Whether this tab uses workspaces, i.e. its window got the workspace
+    /// layout when it loaded (see `canHostWorkspaces`). Fixed for the
+    /// window's lifetime, unlike its style, which e.g. non-native fullscreen
+    /// changes.
     var supportsWorkspaces: Bool {
-        window is TerminalWindow && !(window is HiddenTitlebarTerminalWindow)
+        window?.contentViewController is WorkspaceSplitViewController
+    }
+
+    /// Whether this tab may join `other`'s native tab group. Workspace tabs
+    /// only share a group with workspace tabs, since tabs without the
+    /// workspace layout would be stranded in it (e.g. an undone tab whose
+    /// window follows a config changed since it closed).
+    func canShareTabGroup(with other: NSWindow) -> Bool {
+        supportsWorkspaces == ((other.windowController as? TerminalController)?.supportsWorkspaces ?? false)
+    }
+
+    /// Whether a just-loaded window can host workspaces. Workspaces are tabs
+    /// of one native tab group with their controls in the titlebar, so
+    /// windows that never tab (hidden titlebar) or have no titlebar
+    /// (`window-decoration = false`) can't. Decided by window class rather
+    /// than `tabbingMode`, which is briefly `.automatic` for hidden titlebar
+    /// windows after they load.
+    var canHostWorkspaces: Bool {
+        guard let window = window as? TerminalWindow,
+              !(window is HiddenTitlebarTerminalWindow) else { return false }
+        return window.styleMask.contains(.titled)
     }
 
     /// The tabs of this tab's workspace in native tab order. The native tab
