@@ -39,7 +39,8 @@ private struct TabStrip: View {
             .buttonStyle(.borderless)
             .help("New Tab")
         }
-        .padding(.horizontal, 6)
+        // Match the vertical inset: 24pt tabs centered in the strip's height.
+        .padding(.horizontal, (WorkspaceWindowGroup.tabStripHeight - 24) / 2)
         .frame(height: WorkspaceWindowGroup.tabStripHeight)
     }
 }
