@@ -88,14 +88,22 @@ private struct TabButton: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(tab.isSelected ? 0.12 : hovering ? 0.05 : 0))
+                .fill(Color.primary.opacity(backgroundOpacity))
         )
+        .animation(.easeOut(duration: 0.12), value: backgroundOpacity)
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
         .onHover { hovering = $0 }
         .onReceive(titlePublisher) { title = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(tab.isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// The tint over the glass for each state: resting, hovered, and
+    /// selected (unchanged by hover).
+    private var backgroundOpacity: Double {
+        if tab.isSelected { return 0.16 }
+        return hovering ? 0.09 : 0.05
     }
 
     private var titlePublisher: AnyPublisher<String, Never> {
