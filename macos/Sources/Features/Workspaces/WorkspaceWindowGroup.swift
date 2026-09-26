@@ -119,6 +119,10 @@ final class WorkspaceWindowGroup: ObservableObject {
         isSidebarCollapsed.toggle()
     }
 
+    func showSidebar() {
+        isSidebarCollapsed = false
+    }
+
     /// Selects the workspace `offset` positions away, wrapping around.
     func selectAdjacent(offset: Int) {
         guard workspaces.count > 1,

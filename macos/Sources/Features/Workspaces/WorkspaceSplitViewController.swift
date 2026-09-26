@@ -123,7 +123,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        installSidebarToggleButton()
+        installSidebarControls()
     }
 
     /// Collapsing is shared by the group, so the standard action (View menu,
@@ -159,53 +159,77 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         }
     }
 
-    /// A Liquid Glass sidebar button beside the window buttons, like Finder's.
-    /// It's a titlebar accessory, so it stays put while the sidebar collapses.
-    private func installSidebarToggleButton() {
+    /// Liquid Glass sidebar controls beside the window buttons, like Finder's.
+    /// They're a titlebar accessory, so they stay put while the sidebar
+    /// collapses.
+    private func installSidebarControls() {
         // Accessing titlebar accessories without a titlebar crashes, e.g.
         // while non-native fullscreen has removed it.
         guard let window = view.window, window.styleMask.contains(.titled),
-              !window.titlebarAccessoryViewControllers.contains(where: { $0.identifier == Self.sidebarToggleIdentifier })
+              !window.titlebarAccessoryViewControllers.contains(where: { $0.identifier == Self.sidebarControlsIdentifier })
         else { return }
 
-        let button = NSHostingView(rootView: SidebarToggleButton { [weak self] in
-            self?.toggleSidebar(nil)
-        })
-        button.frame = NSRect(x: 0, y: 0, width: 44, height: 28)
+        let controls = NSHostingView(rootView: SidebarControls(
+            newWorkspace: { [weak self] in
+                // Show the sidebar so the new workspace appears in it, without
+                // animating: switching to the new workspace's tab makes AppKit
+                // copy this window's divider position to it, which would
+                // still be collapsed mid-animation.
+                self?.sidebarItem?.isCollapsed = false
+                self?.membership.group?.showSidebar()
+                NSApp.sendAction(#selector(TerminalController.newWorkspace(_:)), to: nil, from: nil)
+            },
+            toggleSidebar: { [weak self] in
+                self?.toggleSidebar(nil)
+            }))
+        controls.frame = NSRect(x: 0, y: 0, width: 72, height: 28)
 
         let accessory = NSTitlebarAccessoryViewController()
-        accessory.identifier = Self.sidebarToggleIdentifier
+        accessory.identifier = Self.sidebarControlsIdentifier
         accessory.layoutAttribute = .left
-        accessory.view = button
+        accessory.view = controls
         window.addTitlebarAccessoryViewController(accessory)
     }
 
-    private static let sidebarToggleIdentifier = NSUserInterfaceItemIdentifier("workspaceSidebarToggle")
+    private static let sidebarControlsIdentifier = NSUserInterfaceItemIdentifier("workspaceSidebarControls")
 }
 
-private struct SidebarToggleButton: View {
-    let action: () -> Void
+/// New Workspace and the sidebar toggle as one Liquid Glass control in the
+/// titlebar.
+private struct SidebarControls: View {
+    let newWorkspace: () -> Void
+    let toggleSidebar: () -> Void
 
     var body: some View {
-        glass(Button(action: action) {
-            Image(systemName: "sidebar.left")
-                .frame(width: 16, height: 16)
+        glass(HStack(spacing: 0) {
+            button("rectangle.stack.badge.plus", help: "New Workspace", action: newWorkspace)
+            button("sidebar.left", help: "Hide or Show Sidebar", action: toggleSidebar)
         })
-        .help("Hide or Show Sidebar")
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.leading, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
-    /// A circular Liquid Glass button, or a borderless one before macOS 26.
+    private func button(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// Interactive Liquid Glass around the buttons, or none before macOS 26.
     @ViewBuilder
-    private func glass(_ button: some View) -> some View {
+    private func glass(_ content: some View) -> some View {
 #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
-            button.buttonStyle(.glass).buttonBorderShape(.circle)
+            content.glassEffect(.regular.interactive(), in: Capsule())
         } else {
-            button.buttonStyle(.borderless)
+            content
         }
 #else
-        button.buttonStyle(.borderless)
+        content
 #endif
     }
 }

@@ -150,7 +150,8 @@ not visibly recreate, move, resize, or reset it.
 
 The workspace bar can be shown or hidden with View → Hide/Show Sidebar
 (`Command-B`) or a sidebar button in the titlebar beside the window buttons,
-which stays in place while the sidebar is collapsed. Collapsing animates in
+which stays in place while the sidebar is collapsed. The same Liquid Glass
+control also holds a New Workspace button. Collapsing animates in
 the visible tab; the terminal column takes the freed width and the window
 keeps its frame. The sidebar never collapses on its own when the window is
 resized narrow.
@@ -643,7 +644,8 @@ Ghostty's existing terminal surfaces.
 
 Implemented:
 
-- Sidebar with workspace list, selection, and New Workspace button.
+- Sidebar with workspace list and selection; a Liquid Glass titlebar control
+  with New Workspace and the sidebar toggle.
 - Tab strip with titles, per-workspace ⌘1–⌘9 labels, selection, close on
   hover, and New Tab; hidden for a single tab.
 - New Workspace (`Command-N`), Next/Previous Workspace

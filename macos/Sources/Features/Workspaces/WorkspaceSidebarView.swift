@@ -19,39 +19,24 @@ private struct WorkspaceListView: View {
     @ObservedObject var group: WorkspaceWindowGroup
 
     var body: some View {
-        VStack(spacing: 0) {
-            // The selection is drawn by the rows from `group.selectedID`
-            // rather than by `List(selection:)`: every tab window has its own
-            // copy of this list, and the underlying tables' own row selection
-            // state went stale (e.g. several rows bold) as the selection
-            // changed in code or in hidden tab windows.
-            List {
-                Section("Workspaces") {
-                    ForEach(group.workspaces) { workspace in
-                        Button {
-                            group.select(workspace.id)
-                        } label: {
-                            WorkspaceRow(name: workspace.name, isSelected: workspace.id == group.selectedID)
-                        }
-                        .buttonStyle(.plain)
+        // The selection is drawn by the rows from `group.selectedID` rather
+        // than by `List(selection:)`: every tab window has its own copy of
+        // this list, and the underlying tables' own row selection state went
+        // stale (e.g. several rows bold) as the selection changed in code or
+        // in hidden tab windows.
+        List {
+            Section("Workspaces") {
+                ForEach(group.workspaces) { workspace in
+                    Button {
+                        group.select(workspace.id)
+                    } label: {
+                        WorkspaceRow(name: workspace.name, isSelected: workspace.id == group.selectedID)
                     }
+                    .buttonStyle(.plain)
                 }
             }
-            .listStyle(.sidebar)
-
-            HStack {
-                Button {
-                    NSApp.sendAction(#selector(TerminalController.newWorkspace(_:)), to: nil, from: nil)
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.borderless)
-                .help("New Workspace")
-
-                Spacer()
-            }
-            .padding(8)
         }
+        .listStyle(.sidebar)
     }
 }
 
