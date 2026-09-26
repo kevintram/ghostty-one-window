@@ -20,11 +20,20 @@ private struct WorkspaceListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            List(selection: selection) {
+            // The selection is drawn by the rows from `group.selectedID`
+            // rather than by `List(selection:)`: every tab window has its own
+            // copy of this list, and the underlying tables' own row selection
+            // state went stale (e.g. several rows bold) as the selection
+            // changed in code or in hidden tab windows.
+            List {
                 Section("Workspaces") {
                     ForEach(group.workspaces) { workspace in
-                        Label(workspace.name, systemImage: "rectangle.stack")
-                            .tag(workspace.id)
+                        Button {
+                            group.select(workspace.id)
+                        } label: {
+                            WorkspaceRow(name: workspace.name, isSelected: workspace.id == group.selectedID)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -44,14 +53,32 @@ private struct WorkspaceListView: View {
             .padding(8)
         }
     }
+}
 
-    private var selection: Binding<UUID?> {
-        Binding(
-            get: { group.selectedID },
-            set: { id in
-                guard let id else { return }
-                group.select(id)
+/// A workspace row, styled like the sidebar list's own selection.
+private struct WorkspaceRow: View {
+    let name: String
+    let isSelected: Bool
+
+    var body: some View {
+        Label {
+            Text(name).fontWeight(isSelected ? .bold : .regular)
+        } icon: {
+            Image(systemName: "rectangle.stack")
+        }
+        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+        // The highlight reaches into the list's own row insets, like the
+        // native selection: 32pt tall, inset 10pt from the sidebar's sides.
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.13))
             }
-        )
+        }
+        .padding(.horizontal, -6)
+        .padding(.vertical, -4)
+            .contentShape(Rectangle())
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
