@@ -50,6 +50,7 @@ private struct TabButton: View {
 
     @State private var title: String
     @State private var hovering = false
+    @ObservedObject private var commandKey = CommandKeyState.shared
 
     init(tab: WorkspaceWindowGroup.Tab, select: @escaping () -> Void) {
         self.tab = tab
@@ -58,28 +59,37 @@ private struct TabButton: View {
     }
 
     var body: some View {
+        // The shortcut and close button get equal fixed-width slots, shown
+        // or hidden in place, so the title stays centered and never shifts.
+        // Each sits flush with its outer edge so both are inset equally.
         HStack(spacing: 4) {
-            Button {
-                (tab.window?.windowController as? TerminalController)?.closeTab(nil)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .frame(width: 16, height: 16)
-            }
-            .buttonStyle(.borderless)
-            .opacity(hovering ? 1 : 0)
-            .allowsHitTesting(hovering)
-            .help("Close Tab")
+            Text(tab.shortcut ?? "")
+                .foregroundStyle(.secondary)
+                .frame(width: Self.sideWidth, alignment: .leading)
+                .opacity(commandKey.isPressed ? 1 : 0)
+                .animation(.easeOut(duration: 0.12), value: commandKey.isPressed)
 
             Text(title)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity)
 
-            if let shortcut = tab.shortcut, !shortcut.isEmpty {
-                Text(shortcut)
-                    .foregroundStyle(.secondary)
+            Button {
+                (tab.window?.windowController as? TerminalController)?.closeTab(nil)
+            } label: {
+                // Sized to the glyph so it sits flush with the edge, with a
+                // larger hit area around it.
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .padding(4)
+                    .contentShape(Rectangle())
+                    .padding(-4)
             }
+            .buttonStyle(.borderless)
+            .frame(width: Self.sideWidth, alignment: .trailing)
+            .opacity(hovering ? 1 : 0)
+            .allowsHitTesting(hovering)
+            .help("Close Tab")
         }
         .font(.system(size: 12))
         .foregroundStyle(tab.isSelected ? .primary : .secondary)
@@ -99,6 +109,8 @@ private struct TabButton: View {
         .accessibilityAddTraits(tab.isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
+    private static let sideWidth: CGFloat = 24
+
     /// The tint over the glass for each state: resting, hovered, and
     /// selected (unchanged by hover).
     private var backgroundOpacity: Double {
@@ -109,5 +121,35 @@ private struct TabButton: View {
     private var titlePublisher: AnyPublisher<String, Never> {
         guard let window = tab.window else { return Empty().eraseToAnyPublisher() }
         return window.publisher(for: \.title).eraseToAnyPublisher()
+    }
+}
+
+/// Whether ⌘ is held, so tabs show their ⌘-number shortcuts only then. One
+/// app-wide modifier monitor shared by every tab.
+@MainActor
+private final class CommandKeyState: ObservableObject {
+    static let shared = CommandKeyState()
+
+    @Published private(set) var isPressed = false
+
+    private init() {
+        _ = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.update(event.modifierFlags)
+            return event
+        }
+
+        // Releasing ⌘ in another app never reaches us.
+        _ = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isPressed = false }
+        }
+    }
+
+    private func update(_ flags: NSEvent.ModifierFlags) {
+        let pressed = flags.contains(.command)
+        if pressed != isPressed { isPressed = pressed }
     }
 }
