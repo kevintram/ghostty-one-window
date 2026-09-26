@@ -45,7 +45,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         splitView.isVertical = true
         splitView.dividerStyle = .thin
 
-        let sidebarController = NSHostingController(rootView: WorkspaceSidebarView(membership: membership))
+        let sidebarController = SidebarHostingController(rootView: WorkspaceSidebarView(membership: membership))
         // Don't let SwiftUI's ideal size drive the window size.
         sidebarController.sizingOptions = []
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController)
@@ -207,6 +207,27 @@ private struct SidebarToggleButton: View {
 #else
         button.buttonStyle(.borderless)
 #endif
+    }
+}
+
+/// Hosts the sidebar without letting it take keyboard focus. Clicking the
+/// sidebar would otherwise move focus off the terminal, and every key would
+/// then miss Ghostty's own handling (keybindings, key releases, input
+/// methods). SwiftUI's `List` is an `NSTableView`, which takes focus on click;
+/// telling it to refuse keeps mouse selection working. SwiftUI creates (and
+/// may recreate) the table lazily, so this is applied on every layout.
+private final class SidebarHostingController<Content: View>: NSHostingController<Content> {
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        refuseFirstResponder(in: view)
+    }
+
+    private func refuseFirstResponder(in view: NSView) {
+        if let table = view as? NSTableView {
+            table.refusesFirstResponder = true
+            return
+        }
+        view.subviews.forEach(refuseFirstResponder)
     }
 }
 
