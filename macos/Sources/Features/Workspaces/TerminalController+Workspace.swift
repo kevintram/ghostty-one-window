@@ -167,6 +167,25 @@ extension TerminalController {
         group.select(id)
     }
 
+    /// Selects workspace `sender.tag` (1-based), or the last one for 9.
+    @IBAction func selectWorkspaceByNumber(_ sender: NSMenuItem) {
+        guard let workspaceGroup,
+              let workspace = workspaceNumbered(sender.tag, in: workspaceGroup) else { return }
+        workspaceGroup.select(workspace.id)
+    }
+
+    /// Whether the workspace for a numbered menu item exists. When it
+    /// doesn't, the item is disabled so its key goes to the terminal.
+    func canSelectWorkspace(numbered number: Int) -> Bool {
+        guard let workspaceGroup else { return false }
+        return workspaceNumbered(number, in: workspaceGroup) != nil
+    }
+
+    private func workspaceNumbered(_ number: Int, in group: WorkspaceWindowGroup) -> WorkspaceWindowGroup.Workspace? {
+        if number == 9 { return group.workspaces.last }
+        return group.workspaces.indices.contains(number - 1) ? group.workspaces[number - 1] : nil
+    }
+
     @IBAction func selectNextWorkspace(_ sender: Any?) {
         workspaceGroup?.selectAdjacent(offset: 1)
     }

@@ -1789,6 +1789,9 @@ extension TerminalController {
         case #selector(selectNextWorkspace), #selector(selectPreviousWorkspace):
             return workspaceGroup != nil
 
+        case #selector(selectWorkspaceByNumber):
+            return canSelectWorkspace(numbered: item.tag)
+
         case #selector(returnToDefaultSize):
             guard let window else { return false }
 

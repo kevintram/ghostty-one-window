@@ -226,6 +226,7 @@ The default commands are:
 | Go to Tab 1–9 | `Command-1` … `Command-9` | Select the Nth tab of the current workspace. |
 | Next Workspace | `Command-Option-]` | Select the next workspace in display order. |
 | Previous Workspace | `Command-Option-[` | Select the previous workspace in display order. |
+| Go to Workspace 1–8 / Last | `Control-1` … `Control-8`, `Control-9` | Select the Nth workspace, or the last one for 9. Keys without a matching workspace go to the terminal. |
 
 Shortcut assignments remain subject to Ghostty's configuration and conflict
 handling. Ghostty's default `new_window` binding moves from `Command-N` to

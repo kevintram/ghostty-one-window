@@ -43,6 +43,20 @@ extension AppDelegate {
             keyEquivalent: "[")
         previous.keyEquivalentModifierMask = [.command, .option]
 
+        // ⌃1–⌃8 select workspace 1–8 and ⌃9 the last one, like ⌘1–⌘9 for
+        // tabs. Hidden to keep the menu short; hidden items still respond
+        // to their key equivalents.
+        for number in 1...9 {
+            let select = menu.addItem(
+                withTitle: number == 9 ? "Select Last Workspace" : "Select Workspace \(number)",
+                action: #selector(TerminalController.selectWorkspaceByNumber(_:)),
+                keyEquivalent: "\(number)")
+            select.keyEquivalentModifierMask = [.control]
+            select.tag = number
+            select.isHidden = true
+            select.allowsKeyEquivalentWhenHidden = true
+        }
+
         let item = NSMenuItem(title: "Workspace", action: nil, keyEquivalent: "")
         item.submenu = menu
 
