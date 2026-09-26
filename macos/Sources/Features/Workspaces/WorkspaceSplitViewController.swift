@@ -170,6 +170,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         else { return }
 
         let controls = NSHostingView(rootView: SidebarControls(
+            membership: membership,
             newWorkspace: { [weak self] in
                 // Show the sidebar so the new workspace appears in it, without
                 // animating: switching to the new workspace's tab makes AppKit
@@ -197,26 +198,32 @@ final class WorkspaceSplitViewController: NSSplitViewController {
 /// New Workspace and the sidebar toggle as one Liquid Glass control in the
 /// titlebar.
 private struct SidebarControls: View {
+    @ObservedObject var membership: WorkspaceMembership
     let newWorkspace: () -> Void
     let toggleSidebar: () -> Void
 
     var body: some View {
         glass(HStack(spacing: 0) {
-            button("rectangle.stack.badge.plus", help: "New Workspace", action: newWorkspace)
-            button("sidebar.left", help: "Hide or Show Sidebar", action: toggleSidebar)
+            button("rectangle.stack.badge.plus", action: newWorkspace)
+                .help("New workspace")
+            if let group = membership.group {
+                SidebarToggle(group: group, button: button("sidebar.left", action: toggleSidebar))
+            } else {
+                button("sidebar.left", action: toggleSidebar)
+                    .help("Hide sidebar")
+            }
         })
         .padding(.leading, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
-    private func button(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+    private func button(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
     }
 
     /// Interactive Liquid Glass around the buttons, or none before macOS 26.
@@ -231,6 +238,16 @@ private struct SidebarControls: View {
 #else
         content
 #endif
+    }
+}
+
+/// The sidebar toggle, with a tooltip that follows the group's collapsed state.
+private struct SidebarToggle<Button: View>: View {
+    @ObservedObject var group: WorkspaceWindowGroup
+    let button: Button
+
+    var body: some View {
+        button.help(group.isSidebarCollapsed ? "Show sidebar" : "Hide sidebar")
     }
 }
 
