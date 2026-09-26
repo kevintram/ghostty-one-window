@@ -18,6 +18,10 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         self.terminalContainer = terminalContainer
         super.init(nibName: nil, bundle: nil)
 
+        // The terminal only fills the detail column; keep its glass background
+        // covering the whole window, behind the sidebar too.
+        terminalContainer.extendsGlassBeyondWindow = true
+
         self.splitView = WorkspaceSplitView()
         setupItems()
     }

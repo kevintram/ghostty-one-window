@@ -10,6 +10,12 @@ class TerminalViewContainer: NSView {
     private(set) var glassEffectView: NSView?
     private var derivedConfig: DerivedConfig?
 
+    /// Set when this view doesn't fill the window (e.g. beside the workspace
+    /// sidebar). The glass background then still covers the whole window and
+    /// overhangs its edges, so the glass's own rim and edge shading are
+    /// clipped by the window instead of drawn inside it.
+    var extendsGlassBeyondWindow = false
+
     var windowThemeFrameView: NSView? {
         window?.contentView?.superview
     }
@@ -75,7 +81,10 @@ class TerminalViewContainer: NSView {
     }
 
     func ghosttyConfigDidChange(_ config: Ghostty.Config, preferredBackgroundColor: NSColor?) {
-        let newValue = DerivedConfig(config: config, preferredBackgroundColor: preferredBackgroundColor, cornerRadius: windowCornerRadius)
+        let newValue = DerivedConfig(
+            config: config,
+            preferredBackgroundColor: preferredBackgroundColor,
+            cornerRadius: extendsGlassBeyondWindow ? nil : windowCornerRadius)
         guard newValue != derivedConfig else { return }
         derivedConfig = newValue
 
@@ -133,9 +142,12 @@ private class TerminalGlassView: NSView, ObservableObject {
 
     private let glassEffectView: NSView
     private var topConstraint: NSLayoutConstraint!
+    private var leadingConstraint: NSLayoutConstraint!
+    private var bottomConstraint: NSLayoutConstraint!
+    private var trailingConstraint: NSLayoutConstraint!
     private let glassViewModel: GlassViewModel
 
-    init(topOffset: CGFloat) {
+    init(insets: TerminalViewContainer.GlassInsets) {
         let viewModel = GlassViewModel()
         self.glassEffectView = NSHostingView(rootView: GlassBackground(model: viewModel))
         self.glassViewModel = viewModel
@@ -146,16 +158,12 @@ private class TerminalGlassView: NSView, ObservableObject {
         // Glass effect view fills this view.
         glassEffectView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(glassEffectView)
-        topConstraint = glassEffectView.topAnchor.constraint(
-            equalTo: topAnchor,
-            constant: topOffset
-        )
-        NSLayoutConstraint.activate([
-            topConstraint,
-            glassEffectView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            glassEffectView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            glassEffectView.trailingAnchor.constraint(equalTo: trailingAnchor),
-        ])
+        topConstraint = glassEffectView.topAnchor.constraint(equalTo: topAnchor)
+        leadingConstraint = glassEffectView.leadingAnchor.constraint(equalTo: leadingAnchor)
+        bottomConstraint = glassEffectView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        trailingConstraint = glassEffectView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        NSLayoutConstraint.activate([topConstraint, leadingConstraint, bottomConstraint, trailingConstraint])
+        updateInsets(insets)
     }
 
     @available(*, unavailable)
@@ -176,10 +184,13 @@ private class TerminalGlassView: NSView, ObservableObject {
         glassViewModel.glass = glass
     }
 
-    /// Updates the top inset offset for both the glass effect and tint overlay.
-    /// Call this when the safe area insets change (e.g., during layout).
-    func updateTopInset(_ offset: CGFloat) {
-        topConstraint.constant = offset
+    /// Updates how far the glass effect and tint overlay extend beyond this
+    /// view. Call this when the safe area insets change (e.g., during layout).
+    func updateInsets(_ insets: TerminalViewContainer.GlassInsets) {
+        topConstraint.constant = -insets.top
+        leadingConstraint.constant = -insets.left
+        bottomConstraint.constant = insets.bottom
+        trailingConstraint.constant = insets.right
     }
 }
 #endif // compiler(>=6.2)
@@ -192,10 +203,10 @@ extension TerminalViewContainer {
             updateGlassEffectTopInsetIfNeeded()
             return existed
         }
-        guard let themeFrameView = windowThemeFrameView else {
+        guard let insets = glassInsets else {
             return nil
         }
-        let effectView = TerminalGlassView(topOffset: -themeFrameView.safeAreaInsets.top)
+        let effectView = TerminalGlassView(insets: insets)
         addSubview(effectView, positioned: .below, relativeTo: terminalView)
         NSLayoutConstraint.activate([
             effectView.topAnchor.constraint(equalTo: topAnchor),
@@ -233,12 +244,36 @@ extension TerminalViewContainer {
         guard
             #available(macOS 26.0, *),
             let effectView = glassEffectView as? TerminalGlassView,
-            let themeFrameView = windowThemeFrameView
+            let insets = glassInsets
         else {
             return
         }
-        effectView.updateTopInset(-themeFrameView.safeAreaInsets.top)
+        effectView.updateInsets(insets)
 #endif // compiler(>=6.2)
+    }
+
+    /// How far the glass extends beyond each edge of this view.
+    typealias GlassInsets = NSEdgeInsets
+
+    /// How far past the window's edges the glass reaches when it's extended
+    /// beyond the window, enough to clip its rim and edge shading.
+    private static let glassOverhang: CGFloat = 16
+
+    private var glassInsets: GlassInsets? {
+        guard let window, let themeFrameView = windowThemeFrameView else { return nil }
+
+        // Stock layout: this view fills the window below the titlebar.
+        guard extendsGlassBeyondWindow else {
+            return NSEdgeInsets(top: themeFrameView.safeAreaInsets.top, left: 0, bottom: 0, right: 0)
+        }
+
+        let frame = convert(bounds, to: nil)
+        let overhang = Self.glassOverhang
+        return NSEdgeInsets(
+            top: window.frame.height - frame.maxY + overhang,
+            left: frame.minX + overhang,
+            bottom: frame.minY + overhang,
+            right: window.frame.width - frame.maxX + overhang)
     }
 
     struct DerivedConfig: Equatable {
