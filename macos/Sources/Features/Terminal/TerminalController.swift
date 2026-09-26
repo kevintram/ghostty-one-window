@@ -1781,7 +1781,7 @@ extension TerminalController {
             guard let currentIndex = tabs.firstIndex(of: window) else { return false }
             return tabs.indices.contains { $0 > currentIndex }
 
-        case #selector(newWorkspace), #selector(selectNextWorkspace), #selector(selectPreviousWorkspace):
+        case #selector(selectNextWorkspace), #selector(selectPreviousWorkspace):
             return workspaceGroup != nil
 
         case #selector(returnToDefaultSize):

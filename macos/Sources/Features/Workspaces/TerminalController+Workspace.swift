@@ -98,7 +98,22 @@ extension TerminalController {
     // MARK: First Responder
 
     @IBAction func newWorkspace(_ sender: Any?) {
-        guard supportsWorkspaces, let window, let group = workspaceGroup else {
+        // ⌘N used to be New Window. In a window that can't have workspaces
+        // (hidden titlebar), it still is. Our `newWindow` needs a focused
+        // surface to inherit from; without one, open a plain window.
+        guard supportsWorkspaces, let window else {
+            if focusedSurface?.surface != nil {
+                newWindow(sender)
+            } else {
+                (NSApp.delegate as? AppDelegate)?.newWindow(sender)
+            }
+            return
+        }
+
+        // A window joins its workspace group a tick after it's shown, so a
+        // quick second ⌘N can arrive before that. Join it now.
+        if workspaceGroup == nil { reconcileWorkspaces() }
+        guard let group = workspaceGroup else {
             NSSound.beep()
             return
         }

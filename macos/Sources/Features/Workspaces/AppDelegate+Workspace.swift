@@ -1,6 +1,20 @@
 import AppKit
 
 extension AppDelegate {
+    /// New Workspace when no workspace window is in the responder chain (no
+    /// windows open, the Quick Terminal or e.g. Settings is key). There's no
+    /// workspace to add to, so ⌘N does what it did before workspaces: the
+    /// `new_window` action, from the focused terminal if there is one so the
+    /// new window inherits its settings such as the working directory.
+    @IBAction func newWorkspace(_ sender: Any?) {
+        if let controller = NSApp.keyWindow?.windowController as? BaseTerminalController,
+           let surface = controller.focusedSurface?.surface {
+            ghostty.newWindow(surface: surface)
+        } else {
+            newWindow(sender)
+        }
+    }
+
     /// Inserts the "Workspace" menu before the "Window" menu. The items
     /// target the first responder, so they act on the key terminal window.
     ///
