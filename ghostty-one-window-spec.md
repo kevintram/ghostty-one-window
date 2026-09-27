@@ -182,9 +182,12 @@ selected workspace.
 ### 6.3 Tab strip and tab selection
 
 The tab strip sits above the terminal, below the titlebar, and shows only the
-selected workspace's tabs, in their native order. Each tab shows its title,
-its `goto_tab` shortcut (⌘1–⌘9, numbered within the workspace), and a close
-button on hover. The strip ends with a New Tab button.
+selected workspace's tabs, in their native order. Each tab is a capsule
+showing a terminal icon, its title, and a close button on hover. While
+Command is held, the icon gives way to the tab's `goto_tab` shortcut (⌘1–⌘9,
+numbered within the workspace). Resting tabs are transparent, hovered ones
+tinted, and the selected one Liquid Glass. The strip ends with a New Tab
+button.
 
 Like the native tab bar, the strip is hidden while the selected workspace has
 a single tab.
