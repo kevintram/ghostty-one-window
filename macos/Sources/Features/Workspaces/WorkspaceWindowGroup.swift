@@ -144,6 +144,15 @@ final class WorkspaceWindowGroup: ObservableObject {
         refreshTabs()
     }
 
+    /// Moves a workspace to `index` in the workspace order. This changes
+    /// display and workspace navigation order only; tabs stay where they are
+    /// in the tab group.
+    func moveWorkspace(_ id: UUID, to index: Int) {
+        guard let from = workspaces.firstIndex(where: { $0.id == id }),
+              workspaces.indices.contains(index) else { return }
+        workspaces.insert(workspaces.remove(at: from), at: index)
+    }
+
     func toggleSidebar() {
         isSidebarCollapsed.toggle()
     }
