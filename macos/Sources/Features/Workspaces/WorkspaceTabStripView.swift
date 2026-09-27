@@ -455,15 +455,9 @@ private struct TabButton: View {
         Button {
             (tab.window?.windowController as? TerminalController)?.closeTab(nil)
         } label: {
-            // Sized to the glyph so it sits flush with the edge, with a
-            // larger hit area around it.
             Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .semibold))
-                .padding(4)
-                .contentShape(Rectangle())
-                .padding(-4)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(TabCloseButtonStyle())
         .help("Close Tab")
     }
 
@@ -512,6 +506,42 @@ private struct TabButton: View {
     private var titlePublisher: AnyPublisher<String, Never> {
         guard let window = tab.window else { return Empty().eraseToAnyPublisher() }
         return window.publisher(for: \.title).eraseToAnyPublisher()
+    }
+}
+
+/// A tab's close button. While hovered, the × brightens and a circle marking
+/// its hit area appears behind it, darkening while pressed.
+private struct TabCloseButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        CloseButton(configuration: configuration)
+    }
+
+    private struct CloseButton: View {
+        let configuration: Configuration
+
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(hovering ? .primary : .secondary)
+                .frame(width: Self.size, height: Self.size)
+                .background(Circle().fill(Color.primary.opacity(circleOpacity)))
+                .contentShape(Circle())
+                .onHover { hovering = $0 }
+                .animation(.easeOut(duration: 0.1), value: circleOpacity)
+                // Laid out as just the glyph, so the × sits flush with the
+                // tab's edge and the circle extends past it.
+                .padding(-Self.overhang)
+        }
+
+        private var circleOpacity: Double {
+            if configuration.isPressed { return 0.2 }
+            return hovering ? 0.12 : 0
+        }
+
+        private static let size: CGFloat = 16
+        private static let overhang: CGFloat = 4
     }
 }
 
