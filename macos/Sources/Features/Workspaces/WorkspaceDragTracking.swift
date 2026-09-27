@@ -93,12 +93,24 @@ enum PressDragTracker {
 }
 
 /// Equally spaced slots in a row or column, one of which is being dragged to
-/// reorder it: the tab strip's tabs or the sidebar's workspaces.
+/// reorder it: the tab strip's tabs or the sidebar's workspaces. The dragged
+/// slot may be a different size from the others (the tab strip keeps the
+/// selected tab wider).
 struct ReorderSlots {
     let count: Int
 
-    /// The distance between adjacent slots.
+    /// The distance between adjacent slots other than the dragged one.
     let stride: CGFloat
+
+    /// The distance the dragged slot takes up, which the slots it passes
+    /// move by.
+    let draggedStride: CGFloat
+
+    init(count: Int, stride: CGFloat, draggedStride: CGFloat? = nil) {
+        self.count = count
+        self.stride = stride
+        self.draggedStride = draggedStride ?? stride
+    }
 
     /// Keeps the slot at `index`, dragged by `offset`, within the slots.
     func clamped(_ offset: CGFloat, from index: Int) -> CGFloat {
@@ -117,8 +129,8 @@ struct ReorderSlots {
     func offset(of index: Int, draggingFrom from: Int, by offset: CGFloat) -> CGFloat {
         if index == from { return offset }
         let to = destination(from: from, offset: offset)
-        if from < to, (from + 1...to).contains(index) { return -stride }
-        if to < from, (to..<from).contains(index) { return stride }
+        if from < to, (from + 1...to).contains(index) { return -draggedStride }
+        if to < from, (to..<from).contains(index) { return draggedStride }
         return 0
     }
 }

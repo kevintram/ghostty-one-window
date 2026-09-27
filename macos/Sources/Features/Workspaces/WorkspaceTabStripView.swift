@@ -29,7 +29,7 @@ private struct TabStrip: View {
 
     private var drag: Drag? { group.tabDrag }
 
-    /// The strip's width, which the tabs share equally.
+    /// The strip's width, which the tabs share (see `tabWidths`).
     @State private var width: CGFloat = 0
 
     private static let spacing: CGFloat = 4
@@ -39,10 +39,17 @@ private struct TabStrip: View {
     private static let slide = Animation.easeOut(duration: slideDuration)
 
     var body: some View {
+        // A tab dragged out of the strip leaves it until the drag ends.
+        let tabs = group.tabs.filter { phase(of: $0) != .draggingOut }
+        let widths = tabWidths(count: tabs.count, includingSelected: tabs.contains(where: \.isSelected))
+
         HStack(spacing: Self.spacing) {
-            // A tab dragged out of the strip leaves it until the drag ends.
-            ForEach(group.tabs.filter { phase(of: $0) != .draggingOut }) { tab in
-                TabButton(tab: tab, isRenaming: isRenaming(tab)) { title in
+            ForEach(tabs) { tab in
+                TabButton(
+                    tab: tab,
+                    width: tab.isSelected ? widths.selected : widths.other,
+                    isRenaming: isRenaming(tab)
+                ) { title in
                     controller(of: tab)?.endRenamingTab(title: title)
                 } select: {
                     if let window = tab.window { group.selectTab(window) }
@@ -66,20 +73,38 @@ private struct TabStrip: View {
         }
         // Match the vertical inset: 24pt tabs centered in the strip's height.
         .padding(.horizontal, Self.inset)
+        // Measure the strip's width, not its content's: the tabs are sized
+        // from it, so letting them feed back into it would never settle.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: WorkspaceWindowGroup.tabStripHeight)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .contentShape(Rectangle())
         .onDrop(of: [.ghosttyWorkspaceTab], delegate: self)
     }
 
-    /// The tabs' slots with all of them in the strip. Computed from the
-    /// strip's width rather than measured, since while a tab is dragged out
-    /// the strip holds one fewer.
+    /// The widths of the selected tab and the others when the strip holds
+    /// `count` tabs: an equal share of the strip, except that the selected
+    /// tab doesn't go below `TabButton.selectedMinWidth` while the others
+    /// keep shrinking. Computed rather than measured, since while a tab is
+    /// dragged out the strip holds one fewer.
+    private func tabWidths(count: Int, includingSelected: Bool) -> (selected: CGFloat, other: CGFloat) {
+        guard count > 0 else { return (0, 0) }
+        let available = max(width - 2 * Self.inset - Self.newTabWidth - CGFloat(count) * Self.spacing, 0)
+        let share = available / CGFloat(count)
+        guard includingSelected, count > 1, share < TabButton.selectedMinWidth else { return (share, share) }
+
+        let selected = min(TabButton.selectedMinWidth, available)
+        return (selected, (available - selected) / CGFloat(count - 1))
+    }
+
+    /// The tabs' slots with all of them in the strip. The dragged tab is the
+    /// selected one, since pressing a tab selects it.
     private var slots: ReorderSlots {
-        let count = group.tabs.count
-        guard count > 0 else { return ReorderSlots(count: 0, stride: 0) }
-        let tabs = width - 2 * Self.inset - Self.newTabWidth - CGFloat(count) * Self.spacing
-        return ReorderSlots(count: count, stride: max(tabs / CGFloat(count), TabButton.minWidth) + Self.spacing)
+        let widths = tabWidths(count: group.tabs.count, includingSelected: true)
+        return ReorderSlots(
+            count: group.tabs.count,
+            stride: widths.other + Self.spacing,
+            draggedStride: widths.selected + Self.spacing)
     }
 
     // MARK: Reordering
@@ -254,7 +279,7 @@ extension TabStrip: DropDelegate {
               drag.phase != .settling,
               let from = index(of: drag.id) else { return }
         let slots = slots
-        let center = Self.inset + CGFloat(from) * slots.stride + (slots.stride - Self.spacing) / 2
+        let center = Self.inset + CGFloat(from) * slots.stride + (slots.draggedStride - Self.spacing) / 2
         let offset = slots.clamped(info.location.x - center, from: from)
 
         // Rejoining the strip makes room for it; following it doesn't animate.
@@ -269,6 +294,7 @@ extension TabStrip: DropDelegate {
 
 private struct TabButton: View {
     let tab: WorkspaceWindowGroup.Tab
+    let width: CGFloat
     let isRenaming: Bool
     let endRenaming: (_ title: String?) -> Void
     let select: () -> Void
@@ -279,11 +305,13 @@ private struct TabButton: View {
 
     init(
         tab: WorkspaceWindowGroup.Tab,
+        width: CGFloat,
         isRenaming: Bool,
         endRenaming: @escaping (_ title: String?) -> Void,
         select: @escaping () -> Void
     ) {
         self.tab = tab
+        self.width = width
         self.isRenaming = isRenaming
         self.endRenaming = endRenaming
         self.select = select
@@ -291,83 +319,166 @@ private struct TabButton: View {
     }
 
     var body: some View {
-        // The close button gets a fixed-width slot, shown or hidden in
-        // place, so the title never shifts for it. It and the icon each sit
-        // flush with their outer edge so both are inset equally.
-        HStack(spacing: Self.spacing) {
-            // A terminal icon, which the tab's ⌘-number replaces while ⌘
-            // is held, pushing the title aside by however wider it is.
-            Group {
-                if showsShortcut, let shortcut = tab.shortcut {
-                    Text(shortcut).fixedSize()
-                } else {
-                    Image(systemName: "terminal.fill")
-                        .accessibilityHidden(true)
-                }
-            }
-            .foregroundStyle(.secondary)
-            .transition(.opacity)
-
-            Group {
-                if isRenaming {
-                    // Starts from the title set by renaming, if any, rather
-                    // than the terminal's.
-                    TabTitleField(
-                        title: (tab.window?.windowController as? BaseTerminalController)?.titleOverride ?? title,
-                        end: endRenaming)
-                } else {
-                    Text(title)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button {
-                (tab.window?.windowController as? TerminalController)?.closeTab(nil)
-            } label: {
-                // Sized to the glyph so it sits flush with the edge, with a
-                // larger hit area around it.
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .padding(4)
-                    .contentShape(Rectangle())
-                    .padding(-4)
-            }
-            .buttonStyle(.borderless)
-            .frame(width: Self.closeWidth, alignment: .trailing)
-            .opacity(hovering ? 1 : 0)
-            .allowsHitTesting(hovering)
-            .help("Close Tab")
-        }
-        .font(.system(size: 12))
-        .foregroundStyle(tab.isSelected ? .primary : .secondary)
-        .padding(.horizontal, Self.inset)
-        .frame(height: 24)
-        .frame(maxWidth: .infinity)
-        .background { background }
-        .animation(.easeOut(duration: 0.12), value: backgroundOpacity)
-        .animation(.easeOut(duration: 0.12), value: showsShortcut)
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .onReceive(titlePublisher) { title = $0 }
-        // One button for VoiceOver, except while renaming, when the title
-        // field must stay reachable.
-        .accessibilityElement(children: isRenaming ? .contain : .combine)
-        .accessibilityAddTraits(isRenaming ? [] : tab.isSelected ? [.isButton, .isSelected] : .isButton)
-        // Pointer selection happens in the strip's drag gesture, on press.
-        .accessibilityAction { select() }
+        content
+            .font(.system(size: 12))
+            .foregroundStyle(tab.isSelected ? .primary : .secondary)
+            .frame(width: width, height: 24)
+            .clipped()
+            .background { background }
+            .animation(.easeOut(duration: 0.12), value: backgroundOpacity)
+            .animation(.easeOut(duration: 0.12), value: showsShortcut)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .onReceive(titlePublisher) { title = $0 }
+            // The full title, which narrow tabs cut short or leave out.
+            .help(title)
+            // One button for VoiceOver, except while renaming, when the title
+            // field must stay reachable.
+            .accessibilityElement(children: isRenaming ? .contain : .combine)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(isRenaming ? [] : tab.isSelected ? [.isButton, .isSelected] : .isButton)
+            // Pointer selection happens in the strip's drag gesture, on press.
+            .accessibilityAction { select() }
     }
 
-    /// The widest the icon's slot gets: the widest ⌘-number.
-    private static let maxIconWidth: CGFloat = 20
+    // MARK: Layout
+
+    // Like Chrome's, tabs keep shrinking to fit however many there are,
+    // showing less as they do: first the title shortens, then the close
+    // button's own space goes, and finally only the icon is left, shrinking
+    // too. Once the close button's space is gone, the selected tab shows it
+    // in place of the icon on hover, and the strip keeps it wide enough for
+    // that.
+
+    private enum Layout {
+        /// Icon, title, and a close button on hover.
+        case full
+
+        /// Icon and title.
+        case narrow
+
+        /// Only the icon.
+        case tiny
+    }
+
+    private var layout: Layout {
+        if width >= Self.narrowWidth { return .full }
+        // Renaming needs the title, however little room is left for it.
+        if width >= Self.tinyWidth || isRenaming { return .narrow }
+        return .tiny
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch layout {
+        case .full:
+            // The close button gets a fixed-width slot, shown or hidden in
+            // place, so the title never shifts for it. It and the icon each
+            // sit flush with their outer edge so both are inset equally.
+            HStack(spacing: Self.spacing) {
+                icon
+                titleView
+                closeButton
+                    .frame(width: Self.closeWidth, alignment: .trailing)
+                    .opacity(hovering ? 1 : 0)
+                    .allowsHitTesting(hovering)
+            }
+            .padding(.horizontal, Self.inset)
+
+        case .narrow:
+            HStack(spacing: Self.spacing) {
+                iconOrClose
+                titleView
+            }
+            .padding(.horizontal, Self.inset)
+
+        case .tiny:
+            iconOrClose
+                .font(.system(size: tinyIconSize))
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// The icon, or once the close button has no space of its own, the close
+    /// button in its place when hovering the selected tab.
+    @ViewBuilder
+    private var iconOrClose: some View {
+        if tab.isSelected && hovering {
+            closeButton
+        } else {
+            icon
+        }
+    }
+
+    /// A terminal icon, which the tab's ⌘-number replaces while ⌘ is held,
+    /// pushing the title aside by however wider it is.
+    private var icon: some View {
+        Group {
+            if showsShortcut, let shortcut = tab.shortcut {
+                Text(shortcut)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .fixedSize(horizontal: layout != .tiny, vertical: false)
+            } else {
+                Image(systemName: "terminal.fill")
+                    .accessibilityHidden(true)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .transition(.opacity)
+    }
+
+    /// The icon's size when it's all a tab shows: shrinking with the tab, down
+    /// to a floor below which it's clipped.
+    private var tinyIconSize: CGFloat {
+        min(12, max(7, (width - 8) * 0.75))
+    }
+
+    private var titleView: some View {
+        Group {
+            if isRenaming {
+                // Starts from the title set by renaming, if any, rather than
+                // the terminal's.
+                TabTitleField(
+                    title: (tab.window?.windowController as? BaseTerminalController)?.titleOverride ?? title,
+                    end: endRenaming)
+            } else {
+                Text(title)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var closeButton: some View {
+        Button {
+            (tab.window?.windowController as? TerminalController)?.closeTab(nil)
+        } label: {
+            // Sized to the glyph so it sits flush with the edge, with a
+            // larger hit area around it.
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .semibold))
+                .padding(4)
+                .contentShape(Rectangle())
+                .padding(-4)
+        }
+        .buttonStyle(.borderless)
+        .help("Close Tab")
+    }
+
+    /// Below these widths, a tab drops to the next layout.
+    private static let narrowWidth: CGFloat = 88
+    private static let tinyWidth: CGFloat = 44
+
+    /// The narrowest the selected tab gets, so it stays findable and its
+    /// close button usable while the others keep shrinking.
+    static let selectedMinWidth: CGFloat = 32
+
     private static let closeWidth: CGFloat = 24
     private static let spacing: CGFloat = 4
     /// Keeps the icon and close button clear of the capsule's rounded ends.
     private static let inset: CGFloat = 8
-
-    /// The narrowest a tab gets, with its title truncated away.
-    static let minWidth = maxIconWidth + closeWidth + 2 * spacing + 2 * inset
 
     /// The tint over the window's glass for each state: none at rest, then
     /// hovered, and selected (unchanged by hover) where Liquid Glass isn't
