@@ -531,8 +531,11 @@ which also collapses its space in the titlebar.
 The tab strip replaces only the bar's presentation. Tabs remain native tab
 windows, and tab creation, selection, closing, key equivalents, and
 restoration continue to use the native tab group and Ghostty's existing code.
-Features the native bar provided that the strip must reimplement over time:
-the tab context menu (including inline rename), tab colors, and bell
+Renaming a tab (Change Tab Title…, `Command-R` by default through
+`prompt_tab_title`) edits its title in place in the strip, which shows while
+a tab is renamed even if it's the workspace's only tab. The title is
+Ghostty's existing tab title override. Features the native bar provided that
+the strip must still reimplement: the tab context menu, tab colors, and bell
 indicators.
 
 ### 10.8 AppKit constraints
@@ -664,6 +667,7 @@ Implemented:
 - Workspace drag-to-reorder in the sidebar.
 - Tab drag-to-reorder in the strip, and moving tabs between workspaces by
   dragging them out of the strip onto the sidebar.
+- Renaming tabs in place in the strip (`Command-R`).
 - New Workspace (`Command-N`), Next/Previous Workspace
   (`Command-Option-]`/`[`), New Window moved to `Command-Shift-N`.
 - Workspace switching via the shared tab group.
