@@ -364,8 +364,8 @@ private struct TabButton: View {
     /// The tint over the glass for each state: resting, hovered, and
     /// selected (unchanged by hover).
     private var backgroundOpacity: Double {
-        if tab.isSelected { return 0.16 }
-        return hovering ? 0.09 : 0.05
+        if tab.isSelected { return 0.24 }
+        return hovering ? 0.13 : 0.08
     }
 
     private var titlePublisher: AnyPublisher<String, Never> {
