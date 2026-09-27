@@ -291,15 +291,22 @@ private struct TabButton: View {
     }
 
     var body: some View {
-        // The shortcut and close button get equal fixed-width slots, shown
-        // or hidden in place, so the title stays centered and never shifts.
-        // Each sits flush with its outer edge so both are inset equally.
+        // The close button gets a fixed-width slot, shown or hidden in
+        // place, so the title never shifts for it. It and the icon each sit
+        // flush with their outer edge so both are inset equally.
         HStack(spacing: Self.spacing) {
-            Text(tab.shortcut ?? "")
-                .foregroundStyle(.secondary)
-                .frame(width: Self.sideWidth, alignment: .leading)
-                .opacity(commandKey.showsShortcuts ? 1 : 0)
-                .animation(.easeOut(duration: 0.12), value: commandKey.showsShortcuts)
+            // A terminal icon, which the tab's ⌘-number replaces while ⌘
+            // is held, pushing the title aside by however wider it is.
+            Group {
+                if showsShortcut, let shortcut = tab.shortcut {
+                    Text(shortcut).fixedSize()
+                } else {
+                    Image(systemName: "terminal.fill")
+                        .accessibilityHidden(true)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .transition(.opacity)
 
             Group {
                 if isRenaming {
@@ -314,7 +321,7 @@ private struct TabButton: View {
                         .truncationMode(.middle)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
                 (tab.window?.windowController as? TerminalController)?.closeTab(nil)
@@ -328,7 +335,7 @@ private struct TabButton: View {
                     .padding(-4)
             }
             .buttonStyle(.borderless)
-            .frame(width: Self.sideWidth, alignment: .trailing)
+            .frame(width: Self.closeWidth, alignment: .trailing)
             .opacity(hovering ? 1 : 0)
             .allowsHitTesting(hovering)
             .help("Close Tab")
@@ -338,11 +345,9 @@ private struct TabButton: View {
         .padding(.horizontal, Self.inset)
         .frame(height: 24)
         .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(backgroundOpacity))
-        )
+        .background { background }
         .animation(.easeOut(duration: 0.12), value: backgroundOpacity)
+        .animation(.easeOut(duration: 0.12), value: showsShortcut)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onReceive(titlePublisher) { title = $0 }
@@ -354,18 +359,43 @@ private struct TabButton: View {
         .accessibilityAction { select() }
     }
 
-    private static let sideWidth: CGFloat = 24
+    /// The widest the icon's slot gets: the widest ⌘-number.
+    private static let maxIconWidth: CGFloat = 20
+    private static let closeWidth: CGFloat = 24
     private static let spacing: CGFloat = 4
-    private static let inset: CGFloat = 6
+    /// Keeps the icon and close button clear of the capsule's rounded ends.
+    private static let inset: CGFloat = 8
 
     /// The narrowest a tab gets, with its title truncated away.
-    static let minWidth = 2 * sideWidth + 2 * spacing + 2 * inset
+    static let minWidth = maxIconWidth + closeWidth + 2 * spacing + 2 * inset
 
-    /// The tint over the glass for each state: resting, hovered, and
-    /// selected (unchanged by hover).
+    /// The tint over the window's glass for each state: none at rest, then
+    /// hovered, and selected (unchanged by hover) where Liquid Glass isn't
+    /// available.
     private var backgroundOpacity: Double {
         if tab.isSelected { return 0.24 }
-        return hovering ? 0.13 : 0.08
+        return hovering ? 0.13 : 0
+    }
+
+    /// Liquid Glass when selected, where available, slightly faded so it
+    /// reads as a highlight rather than a glass control. Otherwise a tint.
+    @ViewBuilder
+    private var background: some View {
+#if compiler(>=6.2)
+        if #available(macOS 26.0, *), tab.isSelected {
+            Color.clear
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .opacity(0.8)
+        } else {
+            Capsule().fill(Color.primary.opacity(backgroundOpacity))
+        }
+#else
+        Capsule().fill(Color.primary.opacity(backgroundOpacity))
+#endif
+    }
+
+    private var showsShortcut: Bool {
+        commandKey.showsShortcuts && tab.shortcut != nil
     }
 
     private var titlePublisher: AnyPublisher<String, Never> {
@@ -393,7 +423,6 @@ private struct TabTitleField: View {
     var body: some View {
         TextField("Tab Title", text: $text)
             .textFieldStyle(.plain)
-            .multilineTextAlignment(.center)
             .focused($isFocused)
             .onAppear { isFocused = true }
             .onSubmit { finish(text) }
