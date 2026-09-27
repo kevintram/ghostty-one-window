@@ -48,11 +48,22 @@ final class WorkspaceWindowGroup: ObservableObject {
     /// been dragged. Shared by every tab window's strip, since pressing a tab
     /// selects it and shows another tab window mid-drag.
     struct TabDrag: Equatable {
-        let id: ObjectIdentifier
-        let offset: CGFloat
+        enum Phase {
+            /// Following the pointer within the strip.
+            case following
 
-        /// Released and animating into its slot, before the native tab moves.
-        var isSettling = false
+            /// Released and animating into its slot, before the native tab
+            /// moves.
+            case settling
+
+            /// Dragged out of the strip as a system drag, to be dropped on a
+            /// workspace in the sidebar.
+            case draggingOut
+        }
+
+        let id: ObjectIdentifier
+        var offset: CGFloat = 0
+        var phase = Phase.following
     }
 
     @Published var tabDrag: TabDrag?

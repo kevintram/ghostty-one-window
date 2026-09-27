@@ -45,8 +45,10 @@ private struct TabStrip: View {
                 }
                 .offset(x: offset(of: tab))
                 // The dragged tab tracks the pointer; the others slide.
-                .animation(isFollowingPointer(tab) ? nil : Self.slide, value: offset(of: tab))
-                .zIndex(drag?.id == tab.id ? 1 : 0)
+                .animation(phase(of: tab) == .following ? nil : Self.slide, value: offset(of: tab))
+                // Left behind, dimmed, while it's dragged out of the strip.
+                .opacity(phase(of: tab) == .draggingOut ? 0.4 : 1)
+                .zIndex(phase(of: tab) == nil ? 0 : 1)
                 .gesture(reorderGesture(for: tab))
             }
 
@@ -74,6 +76,9 @@ private struct TabStrip: View {
     // Selecting shows another tab window, so the rest of the drag may be
     // delivered to either window. It's followed with an app-wide event
     // monitor instead, and drawn from the group's shared `tabDrag`.
+    //
+    // Dragging a tab out of the strip hands off to a system drag, which the
+    // sidebar's workspace rows accept (see `WorkspaceTabDragOut`).
 
     private func reorderGesture(for tab: WorkspaceWindowGroup.Tab) -> some Gesture {
         // Only the press matters; the monitor tracks the rest.
@@ -86,36 +91,48 @@ private struct TabStrip: View {
 
     private func beginDrag(_ tab: WorkspaceWindowGroup.Tab) {
         // The gesture also reports every move; only the press begins a drag.
-        guard NSApp.currentEvent?.type == .leftMouseDown,
-              group.tabDrag?.isSettling != true,
+        guard let press = NSApp.currentEvent,
+              press.type == .leftMouseDown,
+              group.tabDrag == nil || group.tabDrag?.phase == .following,
               let window = tab.window,
               let from = index(of: tab.id) else { return }
 
         if window.tabGroup?.selectedWindow != window { group.selectTab(window) }
-        group.tabDrag = Drag(id: tab.id, offset: 0)
+        group.tabDrag = Drag(id: tab.id)
 
         // The tabs can't change width during the drag, so capture the layout.
         let stride = tabStride
         let count = group.tabs.count
-        let start = NSApp.currentEvent.map(Self.screenX) ?? NSEvent.mouseLocation.x
+        let start = Self.screenPoint(of: press)
+        let host = Self.stripHost(at: press)
 
         // The monitor only sees events after this press.
         Self.stopTracking()
         Self.monitor = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
-        ) { [weak group, weak window] event in
+        ) { [weak group, weak window, weak host] event in
             guard let group, let window else {
                 Self.stopTracking()
                 return event
             }
 
             // Keep the tab within the strip.
+            let point = Self.screenPoint(of: event)
             let offset = min(
-                max(Self.screenX(of: event) - start, -CGFloat(from) * stride),
+                max(point.x - start.x, -CGFloat(from) * stride),
                 CGFloat(count - 1 - from) * stride)
 
             switch event.type {
             case .leftMouseDragged:
+                // Pulled out of the strip: drag it on as a system drag.
+                if let host, let strip = host.window?.convertToScreen(host.convert(host.bounds, to: nil)),
+                   !strip.insetBy(dx: 0, dy: -Self.detachDistance).contains(point) {
+                    Self.stopTracking()
+                    withAnimation(Self.slide) { group.tabDrag = Drag(id: tab.id, phase: .draggingOut) }
+                    WorkspaceTabDragOut.begin(window, in: group, from: host, with: event)
+                    return nil
+                }
+
                 group.tabDrag = Drag(id: tab.id, offset: offset)
 
             case .leftMouseUp:
@@ -166,7 +183,7 @@ private struct TabStrip: View {
         stride: CGFloat,
         in group: WorkspaceWindowGroup
     ) {
-        group.tabDrag = Drag(id: id, offset: CGFloat(to - from) * stride, isSettling: true)
+        group.tabDrag = Drag(id: id, offset: CGFloat(to - from) * stride, phase: .settling)
         DispatchQueue.main.asyncAfter(deadline: .now() + slideDuration) { [weak group, weak window] in
             guard let group else { return }
             var transaction = Transaction()
@@ -178,11 +195,22 @@ private struct TabStrip: View {
         }
     }
 
-    /// The event's horizontal position on screen, comparable across the
-    /// tab windows the drag may be delivered to.
-    private static func screenX(of event: NSEvent) -> CGFloat {
-        guard let window = event.window else { return event.locationInWindow.x }
-        return window.convertPoint(toScreen: event.locationInWindow).x
+    /// How far above or below the strip the pointer can stray before the
+    /// tab is dragged out of it.
+    private static let detachDistance: CGFloat = 16
+
+    /// The event's position on screen, comparable across the tab windows
+    /// the drag may be delivered to.
+    private static func screenPoint(of event: NSEvent) -> NSPoint {
+        guard let window = event.window else { return event.locationInWindow }
+        return window.convertPoint(toScreen: event.locationInWindow)
+    }
+
+    /// The hosting view of the strip that was pressed.
+    private static func stripHost(at event: NSEvent) -> NSView? {
+        guard let frameView = event.window?.contentView?.superview,
+              let hit = frameView.hitTest(event.locationInWindow) else { return nil }
+        return sequence(first: hit, next: \.superview).first { $0 is NSHostingView<WorkspaceTabStripView> }
     }
 
     private func index(of id: ObjectIdentifier) -> Int? {
@@ -199,6 +227,7 @@ private struct TabStrip: View {
     /// and the tabs it has passed by one slot toward where it came from.
     private func offset(of tab: WorkspaceWindowGroup.Tab) -> CGFloat {
         guard let drag,
+              drag.phase != .draggingOut,
               let from = index(of: drag.id),
               let index = index(of: tab.id) else { return 0 }
         if index == from { return drag.offset }
@@ -209,8 +238,9 @@ private struct TabStrip: View {
         return 0
     }
 
-    private func isFollowingPointer(_ tab: WorkspaceWindowGroup.Tab) -> Bool {
-        drag?.id == tab.id && drag?.isSettling == false
+    /// The drag phase of the tab, if it's the one being dragged.
+    private func phase(of tab: WorkspaceWindowGroup.Tab) -> Drag.Phase? {
+        drag?.id == tab.id ? drag?.phase : nil
     }
 }
 
