@@ -189,6 +189,15 @@ button on hover. The strip ends with a New Tab button.
 Like the native tab bar, the strip is hidden while the selected workspace has
 a single tab.
 
+Pressing a tab selects it right away. Dragging it along the strip reorders it
+live: it follows the pointer while the tabs it passes slide aside, and it
+settles into its slot on release. Pulling it out of the strip turns the drag
+into a system drag: the tab leaves the strip and a preview card of it follows
+the pointer, to be dropped on a workspace in the sidebar (see "Moving tabs
+between workspaces"). Dragged back over the strip, the card gives way to the
+tab itself, which rejoins the strip under the pointer. Escape, or dropping
+anywhere else, returns the tab to where it was.
+
 Selecting a tab uses Ghostty's existing native tab-selection path (setting the
 tab group's selected window and making it key). Ghostty's tab navigation —
 `goto_tab` (index, next, previous, last), `move_tab`, Close Other Tabs, and
@@ -287,9 +296,11 @@ application window. Because all workspaces share one native tab group, this
 only changes the tab's workspace membership (and optionally its position in
 the native group). The terminal process and split tree remain unchanged.
 
-Dragging tabs between workspaces is desirable but may be deferred if it adds
-substantial complexity. A context-menu action is an acceptable initial
-interaction.
+A tab is moved by dragging it out of the tab strip onto another workspace in
+the sidebar, which highlights while the tab is over it. The tab goes to the
+end of that workspace, and the selection follows it: its new workspace is
+selected with the tab. The workspace it left shows the tab's neighbor when
+switched back to. A context-menu action is a possible later addition.
 
 Dragging a tab out of its application window creates a one-tab workspace in
 the destination window's `WorkspaceWindowGroup`. If a new destination window
@@ -327,8 +338,8 @@ the window list.
 ### Reordering tabs
 
 A workspace's tab order is its tabs' order in the native tab group. Reordering
-a tab in the tab strip moves its native tab window relative to the other tabs
-of the same workspace.
+a tab in the tab strip, by dragging it or with `move_tab`, moves its native
+tab window relative to the other tabs of the same workspace.
 
 ### Splits
 
@@ -519,8 +530,8 @@ The tab strip replaces only the bar's presentation. Tabs remain native tab
 windows, and tab creation, selection, closing, key equivalents, and
 restoration continue to use the native tab group and Ghostty's existing code.
 Features the native bar provided that the strip must reimplement over time:
-drag-to-reorder, the tab context menu (including inline rename), tab colors,
-and bell indicators.
+the tab context menu (including inline rename), tab colors, and bell
+indicators.
 
 ### 10.8 AppKit constraints
 
@@ -648,6 +659,8 @@ Implemented:
   with New Workspace and the sidebar toggle.
 - Tab strip with titles, per-workspace ⌘1–⌘9 labels, selection, close on
   hover, and New Tab; hidden for a single tab.
+- Tab drag-to-reorder in the strip, and moving tabs between workspaces by
+  dragging them out of the strip onto the sidebar.
 - New Workspace (`Command-N`), Next/Previous Workspace
   (`Command-Option-]`/`[`), New Window moved to `Command-Shift-N`.
 - Workspace switching via the shared tab group.
@@ -665,7 +678,8 @@ Implemented:
 Not yet implemented:
 
 - Workspace rename, reorder, and close (with all-or-cancel confirmation).
-- Moving tabs between workspaces; tab drag-to-reorder; dragging tabs out.
+- Dragging tabs out of the application window; a Move to Workspace context
+  menu action.
 - Tab context menu, tab colors, and bell indicators in the tab strip.
 - Adjustable sidebar width.
 - Workspace commands as Ghostty actions.
