@@ -7,8 +7,10 @@ import UniformTypeIdentifiers
 ///
 /// The tab strip reorders its tabs itself. A tab pulled out of the strip
 /// continues as a system drag, which shows a preview of the tab under the
-/// pointer and which the sidebar's workspace rows accept. The pasteboard
-/// only marks the drag as a tab: the dragged tab is the group's `tabDrag`.
+/// pointer and which the sidebar's workspace rows accept. Back over the
+/// strip, the strip shows the tab itself instead, so the preview is hidden.
+/// The pasteboard only marks the drag as a tab: the dragged tab is the
+/// group's `tabDrag`.
 @MainActor
 final class WorkspaceTabDragOut: NSObject, NSDraggingSource {
     /// The drag in progress, kept alive until it ends.
@@ -16,8 +18,12 @@ final class WorkspaceTabDragOut: NSObject, NSDraggingSource {
 
     private weak var group: WorkspaceWindowGroup?
 
-    private init(group: WorkspaceWindowGroup) {
+    private let preview: NSImage
+    private var isPreviewHidden = false
+
+    private init(group: WorkspaceWindowGroup, preview: NSImage) {
         self.group = group
+        self.preview = preview
     }
 
     /// Begins dragging the tab from `view`, the strip it was pressed in,
@@ -38,7 +44,7 @@ final class WorkspaceTabDragOut: NSObject, NSDraggingSource {
                 height: image.size.height),
             contents: image)
 
-        let source = WorkspaceTabDragOut(group: group)
+        let source = WorkspaceTabDragOut(group: group, preview: image)
         current = source
         let session = view.beginDraggingSession(with: [dragging], event: event, source: source)
         session.animatesToStartingPositionsOnCancelOrFail = true
@@ -67,10 +73,28 @@ final class WorkspaceTabDragOut: NSObject, NSDraggingSource {
         context == .withinApplication ? .move : []
     }
 
+    func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
+        // The strip shows the tab while it's back over it.
+        let isInStrip = group?.tabDrag?.phase == .following
+        guard isInStrip != isPreviewHidden else { return }
+        isPreviewHidden = isInStrip
+
+        let contents = isInStrip ? NSImage(size: preview.size) : preview
+        session.enumerateDraggingItems(
+            options: [],
+            for: nil,
+            classes: [NSPasteboardItem.self],
+            searchOptions: [:]
+        ) { item, _, _ in
+            item.setDraggingFrame(item.draggingFrame, contents: contents)
+        }
+    }
+
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        // A dropped tab has already left the strip; one that wasn't dropped
-        // is shown again where it was.
-        if group?.tabDrag?.phase == .draggingOut {
+        // Unless it's settling into its slot after a drop on the strip, the
+        // tab shows in the strip again: at the end of the workspace it was
+        // dropped on, or where it was if it wasn't dropped.
+        if let phase = group?.tabDrag?.phase, phase != .settling {
             withAnimation(.easeOut(duration: 0.15)) { group?.tabDrag = nil }
         }
         Self.current = nil

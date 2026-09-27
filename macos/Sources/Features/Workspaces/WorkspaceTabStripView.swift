@@ -26,28 +26,25 @@ private struct TabStrip: View {
 
     private var drag: Drag? { group.tabDrag }
 
-    /// The distance between the leading edges of adjacent tabs. Tabs are
-    /// all the same width.
-    @State private var tabStride: CGFloat = 0
+    /// The strip's width, which the tabs share equally.
+    @State private var width: CGFloat = 0
 
     private static let spacing: CGFloat = 4
+    private static let inset = (WorkspaceWindowGroup.tabStripHeight - 24) / 2
+    private static let newTabWidth: CGFloat = 24
     private static let slideDuration = 0.15
     private static let slide = Animation.easeOut(duration: slideDuration)
 
     var body: some View {
         HStack(spacing: Self.spacing) {
-            ForEach(group.tabs) { tab in
+            // A tab dragged out of the strip leaves it until the drag ends.
+            ForEach(group.tabs.filter { phase(of: $0) != .draggingOut }) { tab in
                 TabButton(tab: tab) {
                     if let window = tab.window { group.selectTab(window) }
-                }
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
-                    tabStride = $0 + Self.spacing
                 }
                 .offset(x: offset(of: tab))
                 // The dragged tab tracks the pointer; the others slide.
                 .animation(phase(of: tab) == .following ? nil : Self.slide, value: offset(of: tab))
-                // Left behind, dimmed, while it's dragged out of the strip.
-                .opacity(phase(of: tab) == .draggingOut ? 0.4 : 1)
                 .zIndex(phase(of: tab) == nil ? 0 : 1)
                 .gesture(reorderGesture(for: tab))
             }
@@ -56,14 +53,26 @@ private struct TabStrip: View {
                 NSApp.sendAction(#selector(TerminalController.newTab(_:)), to: nil, from: nil)
             } label: {
                 Image(systemName: "plus")
-                    .frame(width: 24, height: 24)
+                    .frame(width: Self.newTabWidth, height: 24)
             }
             .buttonStyle(.borderless)
             .help("New Tab")
         }
         // Match the vertical inset: 24pt tabs centered in the strip's height.
-        .padding(.horizontal, (WorkspaceWindowGroup.tabStripHeight - 24) / 2)
+        .padding(.horizontal, Self.inset)
         .frame(height: WorkspaceWindowGroup.tabStripHeight)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .contentShape(Rectangle())
+        .onDrop(of: [.ghosttyWorkspaceTab], delegate: self)
+    }
+
+    /// The distance between the leading edges of adjacent tabs when the
+    /// strip holds `count` tabs. Computed rather than measured, since while a
+    /// tab is dragged out the strip holds one fewer.
+    private func stride(count: Int) -> CGFloat {
+        guard count > 0 else { return 0 }
+        let tabs = width - 2 * Self.inset - Self.newTabWidth - CGFloat(count) * Self.spacing
+        return max(tabs / CGFloat(count), TabButton.minWidth) + Self.spacing
     }
 
     // MARK: Reordering
@@ -78,7 +87,9 @@ private struct TabStrip: View {
     // monitor instead, and drawn from the group's shared `tabDrag`.
     //
     // Dragging a tab out of the strip hands off to a system drag, which the
-    // sidebar's workspace rows accept (see `WorkspaceTabDragOut`).
+    // sidebar's workspace rows accept (see `WorkspaceTabDragOut`). Dragged
+    // back over the strip, the tab rejoins it under the pointer until it's
+    // dropped or leaves again.
 
     private func reorderGesture(for tab: WorkspaceWindowGroup.Tab) -> some Gesture {
         // Only the press matters; the monitor tracks the rest.
@@ -101,8 +112,8 @@ private struct TabStrip: View {
         group.tabDrag = Drag(id: tab.id)
 
         // The tabs can't change width during the drag, so capture the layout.
-        let stride = tabStride
         let count = group.tabs.count
+        let stride = stride(count: count)
         let start = Self.screenPoint(of: press)
         let host = Self.stripHost(at: press)
 
@@ -232,15 +243,72 @@ private struct TabStrip: View {
               let index = index(of: tab.id) else { return 0 }
         if index == from { return drag.offset }
 
-        let to = Self.dropIndex(from: from, offset: drag.offset, stride: tabStride, count: group.tabs.count)
-        if from < to, (from + 1...to).contains(index) { return -tabStride }
-        if to < from, (to..<from).contains(index) { return tabStride }
+        let stride = stride(count: group.tabs.count)
+        let to = Self.dropIndex(from: from, offset: drag.offset, stride: stride, count: group.tabs.count)
+        if from < to, (from + 1...to).contains(index) { return -stride }
+        if to < from, (to..<from).contains(index) { return stride }
         return 0
     }
 
     /// The drag phase of the tab, if it's the one being dragged.
     private func phase(of tab: WorkspaceWindowGroup.Tab) -> Drag.Phase? {
         drag?.id == tab.id ? drag?.phase : nil
+    }
+}
+
+// MARK: Dragging back in
+
+// Drops only come from a tab dragged out of this group's strip; other
+// groups' strips have no drag.
+extension TabStrip: DropDelegate {
+    func validateDrop(info: DropInfo) -> Bool {
+        drag.map { $0.phase != .settling } ?? false
+    }
+
+    func dropEntered(info: DropInfo) {
+        follow(info)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        follow(info)
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        guard let drag, drag.phase == .following else { return }
+        withAnimation(Self.slide) { group.tabDrag = Drag(id: drag.id, phase: .draggingOut) }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let drag,
+              let from = index(of: drag.id),
+              let window = group.tabs[from].window else { return false }
+        let count = group.tabs.count
+        let stride = stride(count: count)
+        let to = Self.dropIndex(from: from, offset: drag.offset, stride: stride, count: count)
+        Self.settle(drag.id, window: window, from: from, to: to, stride: stride, in: group)
+        return true
+    }
+
+    /// Shows the dragged tab in the strip, centered under the pointer.
+    private func follow(_ info: DropInfo) {
+        guard let drag,
+              drag.phase != .settling,
+              let from = index(of: drag.id) else { return }
+        let count = group.tabs.count
+        let stride = stride(count: count)
+        let center = Self.inset + CGFloat(from) * stride + (stride - Self.spacing) / 2
+        let offset = min(
+            max(info.location.x - center, -CGFloat(from) * stride),
+            CGFloat(count - 1 - from) * stride)
+
+        // Rejoining the strip makes room for it; following it doesn't animate.
+        let following = Drag(id: drag.id, offset: offset)
+        if drag.phase == .draggingOut {
+            withAnimation(Self.slide) { group.tabDrag = following }
+        } else {
+            group.tabDrag = following
+        }
     }
 }
 
@@ -262,7 +330,7 @@ private struct TabButton: View {
         // The shortcut and close button get equal fixed-width slots, shown
         // or hidden in place, so the title stays centered and never shifts.
         // Each sits flush with its outer edge so both are inset equally.
-        HStack(spacing: 4) {
+        HStack(spacing: Self.spacing) {
             Text(tab.shortcut ?? "")
                 .foregroundStyle(.secondary)
                 .frame(width: Self.sideWidth, alignment: .leading)
@@ -293,7 +361,7 @@ private struct TabButton: View {
         }
         .font(.system(size: 12))
         .foregroundStyle(tab.isSelected ? .primary : .secondary)
-        .padding(.horizontal, 6)
+        .padding(.horizontal, Self.inset)
         .frame(height: 24)
         .frame(maxWidth: .infinity)
         .background(
@@ -311,6 +379,11 @@ private struct TabButton: View {
     }
 
     private static let sideWidth: CGFloat = 24
+    private static let spacing: CGFloat = 4
+    private static let inset: CGFloat = 6
+
+    /// The narrowest a tab gets, with its title truncated away.
+    static let minWidth = 2 * sideWidth + 2 * spacing + 2 * inset
 
     /// The tint over the glass for each state: resting, hovered, and
     /// selected (unchanged by hover).
