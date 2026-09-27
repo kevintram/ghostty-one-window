@@ -68,7 +68,7 @@ final class WorkspaceWindowGroup: ObservableObject {
     /// Used for default names. Never reused within a group.
     private var nextNumber = 1
 
-    /// Set while `moveTab` re-inserts a tab. AppKit briefly selects a
+    /// Set while `reinsert` re-inserts a tab. AppKit briefly selects a
     /// neighboring tab, which may be in another workspace, and that must not
     /// count as a selection.
     private var isMovingTab = false
@@ -172,9 +172,8 @@ final class WorkspaceWindowGroup: ObservableObject {
               let id = controller.workspaceID,
               window.tabGroup?.selectedWindow == window else { return }
 
-        let windows = windows(in: id)
-        if windows.count > 1, let position = windows.firstIndex(of: window) {
-            selectTab(position + 1 < windows.count ? windows[position + 1] : windows[position - 1])
+        if let neighbor = neighbor(of: window, in: id) {
+            selectTab(neighbor)
             return
         }
 
@@ -230,17 +229,80 @@ final class WorkspaceWindowGroup: ObservableObject {
     /// tab order. The selected tab stays selected.
     func moveTab(_ window: NSWindow, to index: Int) {
         guard let selectedID,
-              let tabGroup = window.tabGroup,
-              let selected = tabGroup.selectedWindow else { return }
+              let selected = window.tabGroup?.selectedWindow else { return }
         let windows = windows(in: selectedID)
         guard let from = windows.firstIndex(of: window),
               windows.indices.contains(index),
               index != from else { return }
 
-        // Where to put the tab back if AppKit refuses the move. Left out of
-        // the tab group, it would split off into a window of its own.
+        reinsert(window, next: windows[index], ordered: index < from ? .below : .above, selecting: selected)
+
+        // Renumbers the tabs and refreshes `tabs`.
+        (window.windowController as? TerminalController)?.relabelTabs()
+    }
+
+    /// Moves a tab to the end of another workspace. If it's the visible tab,
+    /// its workspace shows its neighbor instead, like closing it would. If it
+    /// was its workspace's last tab, the workspace is removed and the tab's
+    /// new workspace is selected.
+    func moveTab(_ window: NSWindow, toWorkspace target: UUID) {
+        guard let controller = window.windowController as? TerminalController,
+              controller.workspaceGroup === self,
+              let source = controller.workspaceID,
+              source != target,
+              let anchor = windows(in: target).last,
+              let tabGroup = window.tabGroup else { return }
+
+        let wasSelected = tabGroup.selectedWindow == window
+        let neighbor = neighbor(of: window, in: source)
+        if let neighbor, wasSelected {
+            selectTab(neighbor)
+        }
+
+        guard let selected = tabGroup.selectedWindow,
+              reinsert(window, next: anchor, ordered: .above, selecting: selected) else {
+            // Put things back as they were.
+            if wasSelected { selectTab(window) }
+            return
+        }
+
+        controller.workspaceMembership.assign(to: self, workspace: target)
+        lastSelectedTab[target] = Weak(window)
+        if neighbor == nil {
+            workspaces.removeAll { $0.id == source }
+            lastSelectedTab[source] = nil
+            selectedID = target
+        }
+
+        // Renumbers both workspaces' tabs and refreshes `tabs`.
+        controller.relabelTabs()
+    }
+
+    /// The tab to show in place of the given one in its workspace: the tab
+    /// to its right, or its left if it's the last. Nil if it's the only one.
+    private func neighbor(of window: NSWindow, in workspace: UUID) -> NSWindow? {
+        let windows = windows(in: workspace)
+        guard windows.count > 1, let position = windows.firstIndex(of: window) else { return nil }
+        return position + 1 < windows.count ? windows[position + 1] : windows[position - 1]
+    }
+
+    /// Re-inserts a tab in the tab group next to `anchor`, then selects
+    /// `selected`. Returns whether it moved: if AppKit refuses, the tab goes
+    /// back where it was, since left out of the tab group it would split off
+    /// into a window of its own.
+    ///
+    /// AppKit briefly selects a neighboring tab, which may be in another
+    /// workspace, so key changes are ignored meanwhile.
+    @discardableResult
+    private func reinsert(
+        _ window: NSWindow,
+        next anchor: NSWindow,
+        ordered: NSWindow.OrderingMode,
+        selecting selected: NSWindow
+    ) -> Bool {
+        guard let tabGroup = window.tabGroup else { return false }
         let all = tabGroup.windows
-        guard let position = all.firstIndex(of: window) else { return }
+        guard let position = all.firstIndex(of: window), all.count > 1 else { return false }
         let restore: (NSWindow, NSWindow.OrderingMode) = position + 1 < all.count
             ? (all[position + 1], .below)
             : (all[position - 1], .above)
@@ -249,15 +311,14 @@ final class WorkspaceWindowGroup: ObservableObject {
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0
         tabGroup.removeWindow(window)
-        if !windows[index].addTabbedWindowSafely(window, ordered: index < from ? .below : .above) {
+        let moved = anchor.addTabbedWindowSafely(window, ordered: ordered)
+        if !moved {
             restore.0.addTabbedWindowSafely(window, ordered: restore.1)
         }
         selectTab(selected)
         NSAnimationContext.endGrouping()
         isMovingTab = false
-
-        // Renumbers the tabs and refreshes `tabs`.
-        (window.windowController as? TerminalController)?.relabelTabs()
+        return moved
     }
 
     /// Selects the given tab the same way clicking a native tab does.
