@@ -252,38 +252,29 @@ final class WorkspaceWindowGroup: ObservableObject {
         (window.windowController as? TerminalController)?.relabelTabs()
     }
 
-    /// Moves a tab to the end of another workspace. If it's the visible tab,
-    /// its workspace shows its neighbor instead, like closing it would. If it
-    /// was its workspace's last tab, the workspace is removed and the tab's
-    /// new workspace is selected.
+    /// Moves a tab to the end of another workspace and follows it there,
+    /// selecting the tab and its new workspace. The workspace it left shows
+    /// its neighbor when switched back to, or is removed if it was its only
+    /// tab.
     func moveTab(_ window: NSWindow, toWorkspace target: UUID) {
         guard let controller = window.windowController as? TerminalController,
               controller.workspaceGroup === self,
               let source = controller.workspaceID,
               source != target,
-              let anchor = windows(in: target).last,
-              let tabGroup = window.tabGroup else { return }
+              let anchor = windows(in: target).last else { return }
 
-        let wasSelected = tabGroup.selectedWindow == window
         let neighbor = neighbor(of: window, in: source)
-        if let neighbor, wasSelected {
-            selectTab(neighbor)
-        }
-
-        guard let selected = tabGroup.selectedWindow,
-              reinsert(window, next: anchor, ordered: .above, selecting: selected) else {
-            // Put things back as they were.
-            if wasSelected { selectTab(window) }
-            return
-        }
+        guard reinsert(window, next: anchor, ordered: .above, selecting: window) else { return }
 
         controller.workspaceMembership.assign(to: self, workspace: target)
         lastSelectedTab[target] = Weak(window)
-        if neighbor == nil {
+        if let neighbor {
+            lastSelectedTab[source] = Weak(neighbor)
+        } else {
             workspaces.removeAll { $0.id == source }
             lastSelectedTab[source] = nil
-            selectedID = target
         }
+        selectedID = target
 
         // Renumbers both workspaces' tabs and refreshes `tabs`.
         controller.relabelTabs()
