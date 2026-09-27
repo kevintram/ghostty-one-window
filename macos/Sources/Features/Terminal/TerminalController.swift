@@ -756,7 +756,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     private func closeOtherTabsImmediately() {
-        guard let window = window else { return }
+        guard window != nil else { return }
         let tabs = workspaceTabs
         guard tabs.count > 1 else { return }
 
