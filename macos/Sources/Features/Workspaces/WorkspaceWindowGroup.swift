@@ -44,6 +44,19 @@ final class WorkspaceWindowGroup: ObservableObject {
     /// The selected workspace's tabs in native tab group order.
     @Published private(set) var tabs: [Tab] = []
 
+    /// A tab being dragged in the tab strip to reorder it, and how far it's
+    /// been dragged. Shared by every tab window's strip, since pressing a tab
+    /// selects it and shows another tab window mid-drag.
+    struct TabDrag: Equatable {
+        let id: ObjectIdentifier
+        let offset: CGFloat
+
+        /// Released and animating into its slot, before the native tab moves.
+        var isSettling = false
+    }
+
+    @Published var tabDrag: TabDrag?
+
     /// Whether the workspace sidebar is collapsed. Shared by every tab window
     /// of the group so switching tabs doesn't bring it back.
     @Published private(set) var isSidebarCollapsed = false
@@ -54,6 +67,11 @@ final class WorkspaceWindowGroup: ObservableObject {
 
     /// Used for default names. Never reused within a group.
     private var nextNumber = 1
+
+    /// Set while `moveTab` re-inserts a tab. AppKit briefly selects a
+    /// neighboring tab, which may be in another workspace, and that must not
+    /// count as a selection.
+    private var isMovingTab = false
 
     /// Appends a new workspace and returns its ID. This does not select it.
     func addWorkspace() -> UUID {
@@ -135,7 +153,8 @@ final class WorkspaceWindowGroup: ObservableObject {
     /// Must be called when one of this group's tabs becomes key. The key
     /// tab decides the selected workspace.
     func tabDidBecomeKey(_ controller: TerminalController) {
-        guard let window = controller.window,
+        guard !isMovingTab,
+              let window = controller.window,
               let id = controller.workspaceID else { return }
 
         lastSelectedTab[id] = Weak(window)
@@ -205,6 +224,40 @@ final class WorkspaceWindowGroup: ObservableObject {
                 shortcut: ($0 as? TerminalWindow)?.keyEquivalent,
                 isSelected: $0 == selected)
         }
+    }
+
+    /// Moves a tab of the selected workspace to `index` in that workspace's
+    /// tab order. The selected tab stays selected.
+    func moveTab(_ window: NSWindow, to index: Int) {
+        guard let selectedID,
+              let tabGroup = window.tabGroup,
+              let selected = tabGroup.selectedWindow else { return }
+        let windows = windows(in: selectedID)
+        guard let from = windows.firstIndex(of: window),
+              windows.indices.contains(index),
+              index != from else { return }
+
+        // Where to put the tab back if AppKit refuses the move. Left out of
+        // the tab group, it would split off into a window of its own.
+        let all = tabGroup.windows
+        guard let position = all.firstIndex(of: window) else { return }
+        let restore: (NSWindow, NSWindow.OrderingMode) = position + 1 < all.count
+            ? (all[position + 1], .below)
+            : (all[position - 1], .above)
+
+        isMovingTab = true
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        tabGroup.removeWindow(window)
+        if !windows[index].addTabbedWindowSafely(window, ordered: index < from ? .below : .above) {
+            restore.0.addTabbedWindowSafely(window, ordered: restore.1)
+        }
+        selectTab(selected)
+        NSAnimationContext.endGrouping()
+        isMovingTab = false
+
+        // Renumbers the tabs and refreshes `tabs`.
+        (window.windowController as? TerminalController)?.relabelTabs()
     }
 
     /// Selects the given tab the same way clicking a native tab does.
