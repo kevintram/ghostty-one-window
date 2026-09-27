@@ -334,8 +334,8 @@ private struct TabButton: View {
             Text(tab.shortcut ?? "")
                 .foregroundStyle(.secondary)
                 .frame(width: Self.sideWidth, alignment: .leading)
-                .opacity(commandKey.isPressed ? 1 : 0)
-                .animation(.easeOut(duration: 0.12), value: commandKey.isPressed)
+                .opacity(commandKey.showsShortcuts ? 1 : 0)
+                .animation(.easeOut(duration: 0.12), value: commandKey.showsShortcuts)
 
             Text(title)
                 .lineLimit(1)
@@ -398,13 +398,17 @@ private struct TabButton: View {
     }
 }
 
-/// Whether ⌘ is held, so tabs show their ⌘-number shortcuts only then. One
-/// app-wide modifier monitor shared by every tab.
+/// Whether tabs show their ⌘-number shortcuts: once ⌘ has been held for a
+/// moment, so they don't flash while pressing a shortcut, and until it's
+/// released. One app-wide modifier monitor shared by every tab.
 @MainActor
 private final class CommandKeyState: ObservableObject {
     static let shared = CommandKeyState()
 
-    @Published private(set) var isPressed = false
+    @Published private(set) var showsShortcuts = false
+
+    private static let delay: Duration = .milliseconds(500)
+    private var pendingShow: Task<Void, Never>?
 
     private init() {
         _ = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
@@ -418,12 +422,28 @@ private final class CommandKeyState: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.isPressed = false }
+            MainActor.assumeIsolated { self?.hide() }
         }
     }
 
     private func update(_ flags: NSEvent.ModifierFlags) {
-        let pressed = flags.contains(.command)
-        if pressed != isPressed { isPressed = pressed }
+        guard flags.contains(.command) else {
+            hide()
+            return
+        }
+
+        guard !showsShortcuts, pendingShow == nil else { return }
+        pendingShow = Task { [weak self] in
+            try? await Task.sleep(for: Self.delay)
+            guard let self, !Task.isCancelled else { return }
+            pendingShow = nil
+            showsShortcuts = true
+        }
+    }
+
+    private func hide() {
+        pendingShow?.cancel()
+        pendingShow = nil
+        if showsShortcuts { showsShortcuts = false }
     }
 }
