@@ -106,6 +106,17 @@ extension TerminalController {
             order: workspaceGroup.workspaces.map(\.id))
     }
 
+    /// Ends renaming the tab in its tab strip, setting its title to
+    /// `title`, or leaving it if nil (cancelled). An empty title restores
+    /// the terminal's own. Keyboard focus goes back to the terminal, also
+    /// when the rename ended because the window stopped being key, so it's
+    /// there when it's key again.
+    func endRenamingTab(title: String?) {
+        workspaceMembership.isRenamingTab = false
+        if let title { titleOverride = title.isEmpty ? nil : title }
+        if let focusedSurface { window?.makeFirstResponder(focusedSurface) }
+    }
+
     /// Returns a restored tab to the workspace it was closed from,
     /// recreating the workspace if that was its last tab. Does nothing if
     /// the restored window can't be a tab under the current config.

@@ -437,6 +437,11 @@ final class WorkspaceMembership: ObservableObject {
     @Published private(set) var group: WorkspaceWindowGroup?
     private(set) var workspaceID: UUID?
 
+    /// Whether the tab's title is being edited in its tab strip, which
+    /// shows while it is, even for a single tab. Only the tab's own window
+    /// edits it; every tab window has its own copy of the strip.
+    @Published var isRenamingTab = false
+
     func assign(to group: WorkspaceWindowGroup, workspace: UUID) {
         workspaceID = workspace
         self.group = group

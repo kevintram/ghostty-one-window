@@ -86,12 +86,15 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         tabStrip.translatesAutoresizingMaskIntoConstraints = false
         detail.view.addSubview(tabStrip)
 
-        // Like the native tab bar, the strip is only shown with 2+ tabs.
+        // Like the native tab bar, the strip is only shown with 2+ tabs, or
+        // while this window's tab is being renamed in it.
         let tabStripHeight = tabStrip.heightAnchor.constraint(equalToConstant: 0)
         tabStripVisibility = membership.$group
-            .map { group -> AnyPublisher<Bool, Never> in
+            .map { [membership] group -> AnyPublisher<Bool, Never> in
                 guard let group else { return Just(false).eraseToAnyPublisher() }
-                return group.$tabs.map { $0.count > 1 }.eraseToAnyPublisher()
+                return group.$tabs.combineLatest(membership.$isRenamingTab)
+                    .map { tabs, isRenaming in tabs.count > 1 || isRenaming }
+                    .eraseToAnyPublisher()
             }
             .switchToLatest()
             .removeDuplicates()

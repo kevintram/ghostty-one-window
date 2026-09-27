@@ -7183,6 +7183,11 @@ pub const Keybinds = struct {
             );
             try self.set.put(
                 alloc,
+                .{ .key = .{ .unicode = 'r' }, .mods = .{ .super = true } },
+                .{ .prompt_tab_title = {} },
+            );
+            try self.set.put(
+                alloc,
                 .{ .key = .{ .unicode = '[' }, .mods = .{ .super = true, .shift = true } },
                 .{ .previous_tab = {} },
             );

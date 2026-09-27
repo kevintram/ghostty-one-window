@@ -12,7 +12,7 @@ struct WorkspaceTabStripView: View {
 
     var body: some View {
         if let group = membership.group {
-            TabStrip(group: group)
+            TabStrip(group: group, membership: membership)
         } else {
             Color.clear
         }
@@ -21,6 +21,9 @@ struct WorkspaceTabStripView: View {
 
 private struct TabStrip: View {
     @ObservedObject var group: WorkspaceWindowGroup
+
+    /// The membership of the tab whose window shows this strip.
+    @ObservedObject var membership: WorkspaceMembership
 
     private typealias Drag = WorkspaceWindowGroup.TabDrag
 
@@ -39,14 +42,17 @@ private struct TabStrip: View {
         HStack(spacing: Self.spacing) {
             // A tab dragged out of the strip leaves it until the drag ends.
             ForEach(group.tabs.filter { phase(of: $0) != .draggingOut }) { tab in
-                TabButton(tab: tab) {
+                TabButton(tab: tab, isRenaming: isRenaming(tab)) { title in
+                    controller(of: tab)?.endRenamingTab(title: title)
+                } select: {
                     if let window = tab.window { group.selectTab(window) }
                 }
                 .offset(x: offset(of: tab))
                 // The dragged tab tracks the pointer; the others slide.
                 .animation(phase(of: tab) == .following ? nil : Self.slide, value: offset(of: tab))
                 .zIndex(phase(of: tab) == nil ? 0 : 1)
-                .gesture(reorderGesture(for: tab))
+                // Clicks in the title field while renaming position the cursor.
+                .gesture(reorderGesture(for: tab), including: isRenaming(tab) ? .subviews : .all)
             }
 
             Button {
@@ -194,6 +200,16 @@ private struct TabStrip: View {
         return slots.offset(of: index, draggingFrom: from, by: drag.offset)
     }
 
+    /// Whether the tab's title is being edited in this strip, which only
+    /// happens in the tab's own window.
+    private func isRenaming(_ tab: WorkspaceWindowGroup.Tab) -> Bool {
+        membership.isRenamingTab && controller(of: tab)?.workspaceMembership === membership
+    }
+
+    private func controller(of tab: WorkspaceWindowGroup.Tab) -> TerminalController? {
+        tab.window?.windowController as? TerminalController
+    }
+
     /// The drag phase of the tab, if it's the one being dragged.
     private func phase(of tab: WorkspaceWindowGroup.Tab) -> Drag.Phase? {
         drag?.id == tab.id ? drag?.phase : nil
@@ -253,14 +269,23 @@ extension TabStrip: DropDelegate {
 
 private struct TabButton: View {
     let tab: WorkspaceWindowGroup.Tab
+    let isRenaming: Bool
+    let endRenaming: (_ title: String?) -> Void
     let select: () -> Void
 
     @State private var title: String
     @State private var hovering = false
     @ObservedObject private var commandKey = CommandKeyState.shared
 
-    init(tab: WorkspaceWindowGroup.Tab, select: @escaping () -> Void) {
+    init(
+        tab: WorkspaceWindowGroup.Tab,
+        isRenaming: Bool,
+        endRenaming: @escaping (_ title: String?) -> Void,
+        select: @escaping () -> Void
+    ) {
         self.tab = tab
+        self.isRenaming = isRenaming
+        self.endRenaming = endRenaming
         self.select = select
         _title = State(initialValue: tab.window?.title ?? "")
     }
@@ -276,10 +301,20 @@ private struct TabButton: View {
                 .opacity(commandKey.showsShortcuts ? 1 : 0)
                 .animation(.easeOut(duration: 0.12), value: commandKey.showsShortcuts)
 
-            Text(title)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity)
+            Group {
+                if isRenaming {
+                    // Starts from the title set by renaming, if any, rather
+                    // than the terminal's.
+                    TabTitleField(
+                        title: (tab.window?.windowController as? BaseTerminalController)?.titleOverride ?? title,
+                        end: endRenaming)
+                } else {
+                    Text(title)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: .infinity)
 
             Button {
                 (tab.window?.windowController as? TerminalController)?.closeTab(nil)
@@ -311,8 +346,10 @@ private struct TabButton: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onReceive(titlePublisher) { title = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(tab.isSelected ? [.isButton, .isSelected] : .isButton)
+        // One button for VoiceOver, except while renaming, when the title
+        // field must stay reachable.
+        .accessibilityElement(children: isRenaming ? .contain : .combine)
+        .accessibilityAddTraits(isRenaming ? [] : tab.isSelected ? [.isButton, .isSelected] : .isButton)
         // Pointer selection happens in the strip's drag gesture, on press.
         .accessibilityAction { select() }
     }
@@ -334,6 +371,44 @@ private struct TabButton: View {
     private var titlePublisher: AnyPublisher<String, Never> {
         guard let window = tab.window else { return Empty().eraseToAnyPublisher() }
         return window.publisher(for: \.title).eraseToAnyPublisher()
+    }
+}
+
+/// A tab's title being edited in place. Return saves it, and so does
+/// leaving it: clicking elsewhere, or the window losing key status when
+/// switching tabs or apps, which ends the rename and removes the field.
+/// Escape cancels.
+private struct TabTitleField: View {
+    let end: (_ title: String?) -> Void
+
+    @State private var text: String
+    @State private var ended = false
+    @FocusState private var isFocused: Bool
+
+    init(title: String, end: @escaping (_ title: String?) -> Void) {
+        self.end = end
+        _text = State(initialValue: title)
+    }
+
+    var body: some View {
+        TextField("Tab Title", text: $text)
+            .textFieldStyle(.plain)
+            .multilineTextAlignment(.center)
+            .focused($isFocused)
+            .onAppear { isFocused = true }
+            .onSubmit { finish(text) }
+            .onExitCommand { finish(nil) }
+            .onChange(of: isFocused) { focused in
+                if !focused { finish(text) }
+            }
+            .onDisappear { finish(text) }
+    }
+
+    /// Ends the rename once, however it ends.
+    private func finish(_ title: String?) {
+        guard !ended else { return }
+        ended = true
+        end(title)
     }
 }
 

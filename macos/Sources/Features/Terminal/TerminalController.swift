@@ -643,6 +643,19 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         self.relabelTabs()
     }
 
+    // Workspace windows edit tab titles in their tab strip. Ghostty's own
+    // inline editor works on the native tab bar, which is hidden there.
+
+    override func promptTabTitle() {
+        guard workspaceGroup != nil else { return super.promptTabTitle() }
+        workspaceMembership.isRenamingTab = true
+    }
+
+    override func changeTabTitle(_ sender: Any) {
+        guard workspaceGroup != nil else { return super.changeTabTitle(sender) }
+        promptTabTitle()
+    }
+
     override func syncAppearance() {
         // When our focus changes, we update our window appearance based on the
         // currently focused surface.
@@ -1310,6 +1323,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         scheduleWorkspaceReconcile()
         self.relabelTabs()
         self.fixTabBar()
+    }
+
+    override func windowDidResignKey(_ notification: Notification) {
+        super.windowDidResignKey(notification)
+
+        // Switching tabs or apps ends a rename, which saves the title,
+        // rather than leaving the edit open indefinitely.
+        workspaceMembership.isRenamingTab = false
     }
 
     override func windowDidMove(_ notification: Notification) {
