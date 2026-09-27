@@ -189,6 +189,12 @@ numbered within the workspace). Resting tabs are transparent, hovered ones
 tinted, and the selected one Liquid Glass. The strip ends with a New Tab
 button.
 
+However many tabs there are, they share the strip's width and keep
+shrinking, as in Chrome: titles shorten, then the close button's space goes
+(the selected tab shows it in place of its icon on hover), and finally only
+a shrinking icon is left. The selected tab keeps a minimum width so it stays
+findable and closable. Hovering a tab shows its full title.
+
 Like the native tab bar, the strip is hidden while the selected workspace has
 a single tab.
 
