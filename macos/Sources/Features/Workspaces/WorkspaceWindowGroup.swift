@@ -250,7 +250,8 @@ final class WorkspaceWindowGroup: ObservableObject {
             Tab(
                 id: ObjectIdentifier($0),
                 window: $0,
-                shortcut: ($0 as? TerminalWindow)?.keyEquivalent,
+                // Tabs without a shortcut have an empty key equivalent.
+                shortcut: ($0 as? TerminalWindow)?.keyEquivalent.flatMap { $0.isEmpty ? nil : $0 },
                 isSelected: $0 == selected)
         }
     }
