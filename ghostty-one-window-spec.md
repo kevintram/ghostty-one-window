@@ -288,8 +288,8 @@ closes.
 
 Workspaces are reordered by dragging them in the sidebar, where the dragged
 row follows the pointer and the rows it passes slide aside, as in the tab
-strip. Dragging a row doesn't select it. Reordering affects display and
-workspace-navigation order only.
+strip. As with tabs, pressing a row selects its workspace right away.
+Reordering affects display and workspace-navigation order only.
 
 ### Moving tabs between workspaces
 

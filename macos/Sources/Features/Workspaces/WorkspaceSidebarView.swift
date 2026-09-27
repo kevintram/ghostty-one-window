@@ -27,13 +27,10 @@ private struct WorkspaceListView: View {
     /// The workspace a tab dragged out of the tab strip would be dropped on.
     @State private var dropTarget: UUID?
 
-    /// The row being dragged to reorder it, and how far it's been dragged.
-    @GestureState(resetTransaction: Transaction(animation: Self.slide))
-    private var drag: (id: UUID, offset: CGFloat)?
+    private var drag: WorkspaceWindowGroup.WorkspaceDrag? { group.workspaceDrag }
 
     private static let rowHeight: CGFloat = 32
     private static let slide = Animation.easeOut(duration: 0.15)
-    private static let coordinateSpace = "WorkspaceList"
 
     // The metrics match the native sidebar list this replaced.
 
@@ -58,64 +55,72 @@ private struct WorkspaceListView: View {
                         // The dragged row tracks the pointer; the others slide.
                         .animation(drag?.id == workspace.id ? nil : Self.slide, value: offset(at: index))
                         .zIndex(drag?.id == workspace.id ? 1 : 0)
-                        .gesture(reorderGesture(for: workspace.id))
+                        .gesture(DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(workspace.id) })
                         .onDrop(
                             of: [.ghosttyWorkspaceTab],
                             delegate: TabDropDelegate(workspace: workspace.id, group: group, target: $dropTarget))
                 }
             }
             .padding(.horizontal, 10)
-            .coordinateSpace(name: Self.coordinateSpace)
         }
     }
 
     // MARK: Reordering
 
-    // Unlike a tab, dragging a row doesn't select it, so the drag stays in
-    // this window's sidebar and the workspaces reorder on release.
+    // Pressing a row selects its workspace right away, like a tab, so a
+    // click is just a drag that doesn't go anywhere. Dragging moves the row
+    // with the pointer while the rows it passes slide into its place, and
+    // the workspaces reorder on release.
+    //
+    // Selecting shows another tab window, so the rest of the drag is
+    // followed by `PressDragTracker` and drawn from the group's shared
+    // `workspaceDrag`. The row is found by ID each time, since workspaces
+    // can come and go during the drag (e.g. when a last terminal exits).
 
-    // The row is found by ID each time, since workspaces can come and go
-    // during the drag (e.g. when a workspace's last terminal exits).
+    private func beginDrag(_ id: UUID) {
+        // The gesture also reports every move; only the press begins a drag.
+        guard let press = NSApp.currentEvent, press.type == .leftMouseDown else { return }
 
-    private func reorderGesture(for id: UUID) -> some Gesture {
-        // Measured in the list, since the dragged row moves under the pointer.
-        DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.coordinateSpace))
-            .updating($drag) { value, drag, _ in
-                guard let from = index(of: id) else { return }
-                drag = (id, clamped(value.translation.height, at: from))
+        group.select(id)
+        group.workspaceDrag = .init(id: id)
+
+        let group = group
+        PressDragTracker.begin(from: press) { [weak group] _, translation in
+            guard let group else { return false }
+            guard let from = Self.index(of: id, in: group) else {
+                // The workspace is gone.
+                group.workspaceDrag = nil
+                return false
             }
-            .onEnded { value in
-                guard let from = index(of: id) else { return }
-                let to = dropIndex(from: from, offset: clamped(value.translation.height, at: from))
-                withAnimation(Self.slide) { group.moveWorkspace(id, to: to) }
+            group.workspaceDrag = .init(id: id, offset: Self.slots(of: group).clamped(translation.height, from: from))
+            return true
+        } released: { [weak group] translation in
+            guard let group else { return }
+            withAnimation(Self.slide) {
+                if let from = Self.index(of: id, in: group) {
+                    let slots = Self.slots(of: group)
+                    let offset = slots.clamped(translation.height, from: from)
+                    group.moveWorkspace(id, to: slots.destination(from: from, offset: offset))
+                }
+                group.workspaceDrag = nil
             }
+        } cancelled: { [weak group] in
+            withAnimation(Self.slide) { group?.workspaceDrag = nil }
+        }
     }
 
-    private func index(of id: UUID) -> Int? {
+    private static func index(of id: UUID, in group: WorkspaceWindowGroup) -> Int? {
         group.workspaces.firstIndex { $0.id == id }
     }
 
-    /// Keeps a row dragged by `offset` within the list.
-    private func clamped(_ offset: CGFloat, at index: Int) -> CGFloat {
-        min(max(offset, -CGFloat(index) * Self.rowHeight),
-            CGFloat(group.workspaces.count - 1 - index) * Self.rowHeight)
+    private static func slots(of group: WorkspaceWindowGroup) -> ReorderSlots {
+        ReorderSlots(count: group.workspaces.count, stride: rowHeight)
     }
 
-    /// Where a row dragged by `offset` from `index` would land.
-    private func dropIndex(from index: Int, offset: CGFloat) -> Int {
-        min(max(index + Int((offset / Self.rowHeight).rounded()), 0), group.workspaces.count - 1)
-    }
-
-    /// How far the row is drawn from its slot: the dragged row by the drag,
-    /// and the rows it has passed by one slot toward where it came from.
+    /// How far the row is drawn from its slot during a drag.
     private func offset(at index: Int) -> CGFloat {
-        guard let drag, let from = self.index(of: drag.id) else { return 0 }
-        if index == from { return drag.offset }
-
-        let to = dropIndex(from: from, offset: drag.offset)
-        if from < to, (from + 1...to).contains(index) { return -Self.rowHeight }
-        if to < from, (to..<from).contains(index) { return Self.rowHeight }
-        return 0
+        guard let drag, let from = Self.index(of: drag.id, in: group) else { return 0 }
+        return Self.slots(of: group).offset(of: index, draggingFrom: from, by: drag.offset)
     }
 }
 
@@ -183,9 +188,9 @@ private struct WorkspaceRow: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture(perform: select)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        // Pointer selection happens in the list's drag gesture, on press.
         .accessibilityAction { select() }
     }
 }

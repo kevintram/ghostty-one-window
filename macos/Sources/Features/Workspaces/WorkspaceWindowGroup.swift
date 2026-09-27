@@ -68,6 +68,16 @@ final class WorkspaceWindowGroup: ObservableObject {
 
     @Published var tabDrag: TabDrag?
 
+    /// A workspace being dragged in the sidebar to reorder it, and how far
+    /// it's been dragged. Shared by every tab window's sidebar, since
+    /// pressing a workspace selects it and shows another tab window mid-drag.
+    struct WorkspaceDrag: Equatable {
+        let id: UUID
+        var offset: CGFloat = 0
+    }
+
+    @Published var workspaceDrag: WorkspaceDrag?
+
     /// Whether the workspace sidebar is collapsed. Shared by every tab window
     /// of the group so switching tabs doesn't bring it back.
     @Published private(set) var isSidebarCollapsed = false
