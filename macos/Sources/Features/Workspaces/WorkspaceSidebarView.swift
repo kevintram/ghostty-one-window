@@ -5,14 +5,22 @@ import SwiftUI
 /// empty until the tab has been assigned to a group.
 struct WorkspaceSidebarView: View {
     @ObservedObject var membership: WorkspaceMembership
+    @ObservedObject var insets: WorkspaceSidebarInsets
 
     var body: some View {
         if let group = membership.group {
-            WorkspaceListView(group: group)
+            WorkspaceListView(group: group, topInset: insets.top)
         } else {
             Color.clear
         }
     }
+}
+
+/// Where the sidebar's content starts, set by its split view controller.
+/// It's the window's titlebar height, since the sidebar extends under it.
+@MainActor
+final class WorkspaceSidebarInsets: ObservableObject {
+    @Published var top: CGFloat = 0
 }
 
 /// The workspace list, laid out by hand rather than with `List` so rows can
@@ -23,6 +31,7 @@ struct WorkspaceSidebarView: View {
 /// would go stale as the selection changes in code or in hidden tab windows.
 private struct WorkspaceListView: View {
     @ObservedObject var group: WorkspaceWindowGroup
+    let topInset: CGFloat
 
     /// The workspace a tab dragged out of the tab strip would be dropped on.
     @State private var dropTarget: UUID?
@@ -41,7 +50,7 @@ private struct WorkspaceListView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 4)
-                    .padding(.top, 2.5)
+                    .padding(.top, 6)
                     .padding(.bottom, 2)
 
                 ForEach(Array(group.workspaces.enumerated()), id: \.element.id) { index, workspace in
@@ -62,7 +71,9 @@ private struct WorkspaceListView: View {
                 }
             }
             .padding(.horizontal, 10)
+            .padding(.top, topInset)
         }
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     // MARK: Reordering

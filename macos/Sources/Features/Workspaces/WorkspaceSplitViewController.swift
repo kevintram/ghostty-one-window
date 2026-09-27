@@ -13,6 +13,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
     private let membership: WorkspaceMembership
     private var tabStripVisibility: AnyCancellable?
     private var sidebarCollapse: AnyCancellable?
+    private let sidebarInsets = WorkspaceSidebarInsets()
 
     /// Whether this window has applied its group's sidebar state yet. The
     /// first time isn't animated, e.g. a new tab opening while the sidebar
@@ -45,7 +46,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         splitView.isVertical = true
         splitView.dividerStyle = .thin
 
-        let sidebarController = NSHostingController(rootView: WorkspaceSidebarView(membership: membership))
+        let sidebarController = NSHostingController(
+            rootView: WorkspaceSidebarView(membership: membership, insets: sidebarInsets))
         // Don't let SwiftUI's ideal size drive the window size.
         sidebarController.sizingOptions = []
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController)
@@ -120,6 +122,20 @@ final class WorkspaceSplitViewController: NSSplitViewController {
     }
 
     // MARK: Sidebar
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+
+        // The sidebar extends under the titlebar, so its content starts
+        // below it. That's measured from the window rather than taken from
+        // SwiftUI's safe area, which has been seen stale by 10pt in one of a
+        // group's windows (likely after moving between displays), shifting
+        // the sidebar when switching to that tab.
+        if let window = view.window {
+            let titlebarHeight = window.frame.height - window.contentLayoutRect.maxY
+            if sidebarInsets.top != titlebarHeight { sidebarInsets.top = titlebarHeight }
+        }
+    }
 
     override func viewWillAppear() {
         super.viewWillAppear()
