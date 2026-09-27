@@ -1614,6 +1614,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // If our index is the same we do nothing
         guard finalIndex != selectedIndex else { return }
 
+        // Workspaces share one tab group. Moving through the group keeps the
+        // selection from passing through another workspace's tab.
+        if let workspaceGroup {
+            workspaceGroup.moveTab(selectedWindow, to: finalIndex)
+            return
+        }
+
         // Get our target window
         let targetWindow = tabbedWindows[finalIndex]
 
