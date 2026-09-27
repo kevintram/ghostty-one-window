@@ -286,7 +286,9 @@ closes.
 
 ### Reordering workspaces
 
-Workspaces can be reordered in the sidebar. Reordering affects display and
+Workspaces are reordered by dragging them in the sidebar, where the dragged
+row follows the pointer and the rows it passes slide aside, as in the tab
+strip. Dragging a row doesn't select it. Reordering affects display and
 workspace-navigation order only.
 
 ### Moving tabs between workspaces
@@ -659,6 +661,7 @@ Implemented:
   with New Workspace and the sidebar toggle.
 - Tab strip with titles, per-workspace ⌘1–⌘9 labels, selection, close on
   hover, and New Tab; hidden for a single tab.
+- Workspace drag-to-reorder in the sidebar.
 - Tab drag-to-reorder in the strip, and moving tabs between workspaces by
   dragging them out of the strip onto the sidebar.
 - New Workspace (`Command-N`), Next/Previous Workspace
@@ -677,7 +680,7 @@ Implemented:
 
 Not yet implemented:
 
-- Workspace rename, reorder, and close (with all-or-cancel confirmation).
+- Workspace rename and close (with all-or-cancel confirmation).
 - Dragging tabs out of the application window; a Move to Workspace context
   menu action.
 - Tab context menu, tab colors, and bell indicators in the tab strip.
