@@ -1321,6 +1321,11 @@ class BaseTerminalController: NSWindowController,
         // I don't know if this is required anymore. We previously had a ref cycle between
         // the view and the window so we had to nil this out to break it but I think this
         // may now be resolved. We should verify that no memory leaks and we can remove this.
+        //
+        // A content view controller (the workspace layout) is required though: it holds
+        // the terminal view, which holds this controller, which holds the window, which
+        // holds the view controller. Releasing it breaks that cycle.
+        window.contentViewController = nil
         window.contentView = nil
 
         // Make sure we clean up all our undos
