@@ -76,6 +76,10 @@ private struct WorkspaceListView: View {
                                 Button("Rename Workspace…") {
                                     controller.value?.beginRenamingWorkspace(workspace.id)
                                 }
+                                Divider()
+                                Button("Close Workspace") {
+                                    controller.value?.close(workspace: workspace.id)
+                                }
                             }
                             .onDrop(
                                 of: [.ghosttyWorkspaceTab],

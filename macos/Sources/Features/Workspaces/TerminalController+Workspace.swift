@@ -123,7 +123,7 @@ extension TerminalController {
             return
         }
 
-        guard tab.surfaceTree.contains(where: { $0.needsConfirmQuit }) else {
+        guard tab.needsConfirmQuit else {
             closeTabImmediately(tab)
             return
         }
@@ -188,6 +188,78 @@ extension TerminalController {
         }
     }
 
+    /// Closes a workspace with all of its tabs, asking once if any of their
+    /// terminals has a running process. The window's last workspace closes
+    /// the window.
+    func close(workspace id: UUID) {
+        guard let workspace = workspaceModel.workspaces.first(where: { $0.id == id }) else { return }
+        guard workspaceModel.workspaces.count > 1 else {
+            closeWindow(nil)
+            return
+        }
+
+        guard workspace.tabs.contains(where: \.needsConfirmQuit) else {
+            closeWorkspaceImmediately(id)
+            return
+        }
+
+        confirmClose(
+            messageText: "Close Workspace?",
+            informativeText: "A terminal in this workspace still has a running process. If you close it, the process will be killed."
+        ) {
+            self.closeWorkspaceImmediately(id)
+        }
+    }
+
+    /// Closes a workspace with all of its tabs, without confirmation. If
+    /// it's the shown workspace, the next workspace (else the previous one)
+    /// is selected first. The window's last workspace closes the window.
+    /// Undoing it puts the workspace back where it was, with its tabs.
+    func closeWorkspaceImmediately(_ id: UUID) {
+        guard let index = workspaceModel.workspaceIndex(of: id) else { return }
+        guard let neighbor = workspaceModel.neighborOfWorkspace(at: index) else {
+            closeWindowImmediately()
+            return
+        }
+
+        let workspace = workspaceModel.workspaces[index]
+        let wasSelected = workspaceModel.selectedWorkspaceID == id
+
+        undoManager?.beginUndoGrouping()
+        defer { undoManager?.endUndoGrouping() }
+
+        // Registered before the tabs close so that, undone in reverse, it runs
+        // once they're back: it reselects the tab that was shown, and makes
+        // the redo for the whole workspace (the tabs register none).
+        if let undoManager {
+            let shownTab = wasSelected ? workspace.selectedTab : nil
+            undoManager.registerUndo(
+                withTarget: self,
+                expiresAfter: undoExpiration
+            ) { target in
+                if let shownTab { target.selectTab(shownTab) }
+
+                undoManager.registerUndo(
+                    withTarget: target,
+                    expiresAfter: target.undoExpiration
+                ) { target in
+                    target.closeWorkspaceImmediately(id)
+                }
+            }
+        }
+
+        // Moving to the neighbor first means none of the closing tabs is
+        // shown, so closing them doesn't show them in turn.
+        if wasSelected { selectWorkspace(neighbor.id) }
+
+        // Each tab's undo puts it back, the first one recreating the
+        // workspace; undone in reverse, they return in order.
+        for tab in workspace.tabs {
+            closeTabImmediately(tab, registerRedo: false)
+        }
+        undoManager?.setActionName("Close Workspace")
+    }
+
     /// Takes a tab out of the window. If it's the shown tab, the tab to its
     /// right in its workspace is selected, else the one to its left; if it
     /// was the workspace's last tab, the workspace goes and the next
@@ -201,13 +273,10 @@ extension TerminalController {
 
     private func tabToSelect(afterDetaching tab: TerminalTab) -> TerminalTab? {
         guard let location = workspaceModel.location(of: tab) else { return nil }
-        let workspaces = workspaceModel.workspaces
-        let tabs = workspaces[location.workspace].tabs
+        let tabs = workspaceModel.workspaces[location.workspace].tabs
         if location.tab + 1 < tabs.count { return tabs[location.tab + 1] }
         if location.tab > 0 { return tabs[location.tab - 1] }
-
-        let neighbor = location.workspace + 1 < workspaces.count ? location.workspace + 1 : location.workspace - 1
-        return workspaces.indices.contains(neighbor) ? workspaces[neighbor].selectedTab : nil
+        return workspaceModel.neighborOfWorkspace(at: location.workspace)?.selectedTab
     }
 
     /// Puts a closed tab back, recreating its workspace if that was its
@@ -382,6 +451,12 @@ extension TerminalController {
     @IBAction func renameWorkspace(_ sender: Any?) {
         guard let id = workspaceModel.selectedWorkspaceID else { return }
         beginRenamingWorkspace(id)
+    }
+
+    /// Closes the selected workspace.
+    @IBAction func closeWorkspace(_ sender: Any?) {
+        guard let id = workspaceModel.selectedWorkspaceID else { return }
+        close(workspace: id)
     }
 
     @IBAction func newWorkspace(_ sender: Any?) {

@@ -29,6 +29,12 @@ final class TerminalTab: ObservableObject, Identifiable {
     /// The title override, else the focused terminal's title.
     @Published private(set) var title = ""
 
+    /// Whether closing the tab needs confirmation: a terminal in it has a
+    /// running process.
+    var needsConfirmQuit: Bool {
+        surfaceTree.contains { $0.needsConfirmQuit }
+    }
+
     private var surfaceTitle = ""
     private var titleCancellable: AnyCancellable?
 
@@ -178,6 +184,13 @@ final class WorkspaceModel: ObservableObject {
             }
         }
         return nil
+    }
+
+    /// The workspace that takes the place of the one at `index` when it goes:
+    /// the next one, else the previous one.
+    func neighborOfWorkspace(at index: Int) -> Workspace? {
+        let neighbor = index + 1 < workspaces.count ? index + 1 : index - 1
+        return workspaces.indices.contains(neighbor) ? workspaces[neighbor] : nil
     }
 
     func workspace(of tab: TerminalTab) -> Workspace? {

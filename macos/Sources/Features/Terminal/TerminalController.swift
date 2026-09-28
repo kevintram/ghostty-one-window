@@ -1030,7 +1030,7 @@ class TerminalController: BaseTerminalController {
         guard !others.isEmpty else { return }
 
         // Check if we have to confirm close.
-        guard others.contains(where: { $0.surfaceTree.contains(where: { $0.needsConfirmQuit }) }) else {
+        guard others.contains(where: \.needsConfirmQuit) else {
             self.closeOtherTabsImmediately()
             return
         }
@@ -1050,8 +1050,7 @@ class TerminalController: BaseTerminalController {
         let tabsToClose = tabs[(currentIndex + 1)...]
         guard !tabsToClose.isEmpty else { return }
 
-        let needsConfirm = tabsToClose.contains { $0.surfaceTree.contains(where: { $0.needsConfirmQuit }) }
-        if !needsConfirm {
+        if !tabsToClose.contains(where: \.needsConfirmQuit) {
             self.closeTabsOnTheRightImmediately()
             return
         }
@@ -1325,7 +1324,7 @@ extension TerminalController {
         case #selector(selectNextWorkspace), #selector(selectPreviousWorkspace):
             return workspaceModel.workspaces.count > 1
 
-        case #selector(renameWorkspace):
+        case #selector(renameWorkspace), #selector(closeWorkspace):
             return supportsTabs
 
         case #selector(selectWorkspaceByNumber):

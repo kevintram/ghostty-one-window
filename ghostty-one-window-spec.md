@@ -220,6 +220,7 @@ The default commands are:
 | New Tab | `Command-T` | Create a tab in the current workspace. |
 | New Workspace | `Command-N` | Create and select a workspace containing one new tab. |
 | Rename Workspace | `Command-Shift-R` | Rename the selected workspace in place in the sidebar. |
+| Close Workspace | None | Close the selected workspace and all of its tabs (8). |
 | Close Tab | `Command-W` | Close the active tab using Ghostty's existing confirmation behavior. The next tab is chosen within the same workspace. |
 | Close Window | `Command-Shift-W` | Close the application window, including every workspace in it. |
 | Hide/Show Sidebar | `Command-B` | Show or hide the workspace sidebar (View menu, titlebar button). |
@@ -277,7 +278,10 @@ in the sidebar.
 
 ### Closing a workspace
 
-Closing a workspace closes all tabs assigned to it.
+Closing a workspace closes all tabs assigned to it. It's chosen from the
+workspace row's context menu, or from the Workspace menu for the selected
+workspace (no default shortcut: `Command-Shift-W` is Close Window and
+`Control-W` belongs to the shell).
 
 Ghostty's existing running-process confirmation behavior must be respected.
 The operation should be all-or-cancel from the user's perspective: if closing
@@ -287,7 +291,12 @@ receiving a confusing sequence of unrelated per-tab prompts.
 When a workspace loses its last tab, the workspace is removed and the
 neighboring workspace (the next one, else the previous one) is selected. If
 the last workspace in an application window is closed, the application window
-closes.
+closes, with Close Window's confirmation.
+
+Undoing a workspace close puts the workspace back where it was, with its
+tabs in order and its custom name, reselecting the tab that was shown if it
+was the selected workspace. Like undoing a tab close, it keeps the terminals
+alive until it expires.
 
 ### Reordering workspaces
 
@@ -512,6 +521,8 @@ Implemented:
   dragging them out of the strip onto the sidebar.
 - Renaming tabs in place in the strip (`Command-R`), and workspaces in place
   in the sidebar (double-click, context menu, `Command-Shift-R`).
+- Closing workspaces from the context menu or the Workspace menu, with one
+  confirmation for all of their tabs and undo.
 - New Workspace (`Command-N`), Next/Previous Workspace
   (`Command-Option-]`/`[`), Go to Workspace (`Control-1`–`9`), New Window
   moved to `Command-Shift-N`.
@@ -533,7 +544,6 @@ Implemented:
 
 Not yet implemented:
 
-- Workspace close (with all-or-cancel confirmation).
 - Dragging tabs out of the application window, or between windows; moving a
   tab into an existing window; a Move to Workspace context menu action.
 - Tab context menu, per-tab colors (the tab color is per window), and bell

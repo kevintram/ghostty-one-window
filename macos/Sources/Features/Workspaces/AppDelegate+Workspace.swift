@@ -37,6 +37,12 @@ extension AppDelegate {
             action: #selector(TerminalController.renameWorkspace(_:)),
             keyEquivalent: "r")
         rename.keyEquivalentModifierMask = [.command, .shift]
+
+        // No shortcut yet: ⌘⇧W is Close Window and ⌃W belongs to the shell.
+        menu.addItem(
+            withTitle: "Close Workspace",
+            action: #selector(TerminalController.closeWorkspace(_:)),
+            keyEquivalent: "")
         menu.addItem(.separator())
 
         let next = menu.addItem(
