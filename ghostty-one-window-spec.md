@@ -1,8 +1,8 @@
 # Ghostty Workspaces for macOS
 
-Status: Draft 0.5  
+Status: Draft 0.6  
 Platform: macOS  
-Project type: Thin fork of Ghostty's native macOS application
+Project type: Fork of Ghostty's native macOS application
 
 ## 1. Summary
 
@@ -12,13 +12,13 @@ A workspace is a named group of terminal tabs. A window can contain multiple
 workspaces, and each workspace can contain multiple tabs. The user selects a
 workspace from a sidebar on the left of the window, and the selected
 workspace's tabs appear in a tab strip above the terminal. The project retains
-Ghostty's existing terminal implementation, native tab lifecycle, split panes,
-renderer, configuration, and macOS integrations.
+Ghostty's existing terminal implementation, split panes, renderer,
+configuration, and macOS integrations.
 
-Under the hood every tab is still a native AppKit tab. All tabs of a window,
-across all of its workspaces, live in one native `NSWindowTabGroup`. The
-native tab bar is hidden and replaced by a workspace-aware tab strip that
-shows only the selected workspace's tabs.
+Tabs are not native AppKit tabs. Each application window is one `NSWindow`
+that holds the tabs of all of its workspaces. A tab is a split tree of
+terminals; only the selected tab's terminals are in the window, and the
+others keep running outside it.
 
 The project is intentionally narrow. It is not intended to become an IDE,
 terminal multiplexer, agent dashboard, browser, file manager, or general
@@ -32,12 +32,12 @@ automation platform.
 - Show the selected workspace's tabs in a tab strip above the terminal.
 - Make switching workspaces as fast as switching tabs.
 - Preserve Ghostty's existing terminal behavior as closely as possible.
-- Support multiple application windows, each coordinated by its own
-  `WorkspaceWindowGroup`.
+- Support multiple application windows, each with its own workspaces.
 - Keep terminals alive when the user switches workspaces.
 - Restore workspace organization alongside Ghostty's existing window and tab
   restoration.
-- Maintain a small, understandable patch set against upstream Ghostty.
+- Keep the workspace code isolated and understandable. Keeping the patch set
+  against upstream Ghostty small is no longer a goal.
 
 ## 3. Non-goals
 
@@ -54,48 +54,41 @@ The initial product will not include:
 - Restoration of arbitrary live processes after the application quits.
 - Replacement of Ghostty's terminal engine, renderer, configuration format,
   split implementation, or shell integration.
-- A custom tab implementation. Tabs remain native AppKit tab windows; only
-  the tab bar's presentation is replaced (see 10.7).
 
 ## 4. Terminology
 
 ### Application window
 
-A user-visible terminal window. Each application window owns an independent
-`WorkspaceWindowGroup` and shows one workspace at a time.
+A user-visible terminal window: one `NSWindow` managed by one
+`TerminalController`. It holds every tab of every one of its workspaces and
+shows one workspace, and one of its tabs, at a time.
 
-Internally, Ghostty uses native AppKit tabbing, where each tab is represented
-by an `NSWindow` in an `NSWindowTabGroup`. An application window is exactly one
-native tab group: it contains the tab windows of every one of its workspaces.
-Only the selected tab window is visible at a time, as with ordinary native
-tabs.
+### Workspace model
 
-### Workspace window group
-
-The application-level coordinator that provides the workspace layer AppKit
-does not provide. It owns the ordered set of workspaces, the selected
-workspace, the last-selected tab of each workspace, and the list of tabs shown
-in the tab strip.
+The window's `WorkspaceModel`: its ordered workspaces with their tabs, the
+selected workspace, each workspace's last-selected tab, and the state the
+sidebar and tab strip share.
 
 ```text
-WorkspaceWindowGroup
+TerminalController (one NSWindow)
 ├── Workspace bar (sidebar)
 ├── Tab strip (selected workspace's tabs)
-└── NSWindowTabGroup
-    └── Tab windows of every workspace
+├── Terminal view (the selected tab's split tree)
+└── WorkspaceModel
+    └── Workspace[]
+        └── TerminalTab[] (split trees of terminals)
 ```
 
 ### Workspace
 
-A named, ordered group of tabs within one application window. A workspace is
-organizational metadata; it does not own a separate terminal runtime or a
-separate native tab group.
+A named, ordered group of tabs within one application window. It does not
+own a separate terminal runtime.
 
 ### Tab
 
-An existing Ghostty terminal tab backed by Ghostty's current
-`TerminalController` and native AppKit tab window. A tab may contain one or
-more split terminal surfaces. Each tab belongs to exactly one workspace.
+A `TerminalTab`: a split tree of one or more terminal surfaces, with its
+focused surface and title override. Each tab belongs to exactly one
+workspace.
 
 ### Pane
 
@@ -107,32 +100,26 @@ The hierarchy is:
 
 ```text
 Application
-└── WorkspaceWindowGroup[]          (one per application window)
+└── TerminalController[]            (one per application window)
     ├── Workspace bar
     ├── Tab strip
-    ├── Workspace[]
-    │   └── Tab[] (by membership)
-    │       └── Pane[]
-    └── NSWindowTabGroup            (holds every workspace's tabs)
+    └── WorkspaceModel
+        └── Workspace[]
+            └── TerminalTab[]
+                └── Pane[]
 ```
 
-Each workspace window group has at least one workspace. Each workspace has at
-least one tab while it exists. Each tab has at least one terminal pane while
-it exists.
-
-A workspace's tab order is the order of its tabs within the shared native tab
-group. Tabs of different workspaces may be interleaved in the native group;
-only the relative order within a workspace is meaningful.
+Each window has at least one workspace. Each workspace has at least one tab
+while it exists. Each tab has at least one terminal pane while it exists.
 
 Switching workspaces selects a tab in the target workspace. It does not
-change the native tab group's membership, terminal ownership, or process
-lifetime.
+create, destroy, or restart any terminal.
 
 ## 6. Core user experience
 
 ### 6.1 Sidebar
 
-The sidebar is the workspace bar for a `WorkspaceWindowGroup`. It is a native
+The sidebar is the window's workspace bar. It is a native
 full-height split-view sidebar on the left of the window: it extends under the
 titlebar, and the window buttons sit on top of it. It contains:
 
@@ -156,33 +143,31 @@ the visible tab; the terminal column takes the freed width and the window
 keeps its frame. The sidebar never collapses on its own when the window is
 resized narrow.
 
-Its width, visibility, selection, and ordering belong to the
-`WorkspaceWindowGroup`, not to an individual tab or workspace: every tab
-window of the group follows the group's collapsed state, applying it
-instantly in hidden tabs so switching tabs never animates.
+Its width, visibility, selection, and ordering belong to the window, not to
+an individual tab or workspace. There is one sidebar per window, so switching
+tabs or workspaces never touches it.
 
 ### 6.2 Workspace selection
 
-Selecting a workspace selects that workspace's last-selected tab in the
-shared native tab group. If that tab is no longer available, its first
-available tab is selected. The tab strip then shows the selected workspace's
-tabs.
+Selecting a workspace selects that workspace's last-selected tab. If that tab
+is no longer available, its first available tab is selected. The tab strip
+then shows the selected workspace's tabs.
 
-Because this is an ordinary native tab selection, the window frame, sidebar,
-and titlebar do not change, and the switch costs the same as switching tabs.
+Because this is an ordinary tab selection, the window frame, sidebar, and
+titlebar do not change, and the switch costs the same as switching tabs.
 
 Switching workspaces does not terminate, recreate, suspend, or reset any
 terminal process. Background terminal output continues to be processed using
 Ghostty's existing behavior.
 
-Selecting a tab of another workspace by any means (for example, when AppKit
-makes it key) also selects that tab's workspace: the key tab decides the
-selected workspace.
+Selecting a tab of another workspace by any means (for example, presenting
+one of its terminals from the command palette or a notification) also
+selects that tab's workspace.
 
 ### 6.3 Tab strip and tab selection
 
 The tab strip sits above the terminal, below the titlebar, and shows only the
-selected workspace's tabs, in their native order. Each tab is a capsule
+selected workspace's tabs, in order. Each tab is a capsule
 showing a terminal icon, its title, and a close button on hover. While
 Command is held, the icon gives way to the tab's `goto_tab` shortcut (⌘1–⌘9,
 numbered within the workspace). Resting tabs are transparent, hovered ones
@@ -195,8 +180,8 @@ shrinking, as in Chrome: titles shorten, then the close button's space goes
 a shrinking icon is left. The selected tab keeps a minimum width so it stays
 findable and closable. Hovering a tab shows its full title.
 
-Like the native tab bar, the strip is hidden while the selected workspace has
-a single tab.
+Like Ghostty's native tab bar, the strip is hidden while the selected
+workspace has a single tab.
 
 Pressing a tab selects it right away. Dragging it along the strip reorders it
 live: it follows the pointer while the tabs it passes slide aside, and it
@@ -207,26 +192,23 @@ between workspaces"). Dragged back over the strip, the card gives way to the
 tab itself, which rejoins the strip under the pointer. Escape, or dropping
 anywhere else, returns the tab to where it was.
 
-Selecting a tab uses Ghostty's existing native tab-selection path (setting the
-tab group's selected window and making it key). Ghostty's tab navigation —
+Selecting a tab swaps its split tree into the window (see 10.3). Ghostty's
+tab navigation —
 `goto_tab` (index, next, previous, last), `move_tab`, Close Other Tabs, and
 Close Tabs to the Right — operates within the current workspace.
 
-The project must not create a second terminal-session abstraction merely to
-support workspace navigation.
 
 ### 6.4 Multiple windows
 
 The application may have multiple application windows. Each window has its own:
 
-- `WorkspaceWindowGroup`.
+- Workspaces and tabs.
 - Selected workspace.
 - Last-selected tab for each workspace.
 - Workspace ordering.
 - Sidebar width and visibility.
 
-Creating a new application window creates a new `WorkspaceWindowGroup` with
-one workspace and one tab.
+Creating a new application window creates one workspace with one tab.
 
 ## 7. Commands and expected behavior
 
@@ -264,8 +246,8 @@ Creating a workspace:
 
 1. Creates a workspace with a stable UUID and default name.
 2. Captures the focused pane's current working directory from the active tab.
-3. Creates one Ghostty tab with the captured working directory as its initial
-   working directory, and adds it to the window's native tab group.
+3. Creates one tab with the captured working directory as its initial
+   working directory.
 4. Assigns the tab to the new workspace.
 5. Selects the workspace and its new tab.
 
@@ -303,9 +285,8 @@ Reordering affects display and workspace-navigation order only.
 ### Moving tabs between workspaces
 
 A tab can be reassigned from one workspace to another within the same
-application window. Because all workspaces share one native tab group, this
-only changes the tab's workspace membership (and optionally its position in
-the native group). The terminal process and split tree remain unchanged.
+application window. This only moves the tab between workspaces. The terminal
+process and split tree remain unchanged.
 
 A tab is moved by dragging it out of the tab strip onto another workspace in
 the sidebar, which highlights while the tab is over it. The tab goes to the
@@ -314,8 +295,8 @@ selected with the tab. The workspace it left shows the tab's neighbor when
 switched back to. A context-menu action is a possible later addition.
 
 Dragging a tab out of its application window creates a one-tab workspace in
-the destination window's `WorkspaceWindowGroup`. If a new destination window
-is created, the application creates a new `WorkspaceWindowGroup` for it. The
+the destination window (not yet implemented). If a new destination window is
+created, it gets its own workspaces. The
 new workspace uses the source workspace's name but receives its own workspace
 UUID; it is not linked to the source workspace. The terminal process and
 split tree continue without restarting.
@@ -327,30 +308,32 @@ workspace is automatically removed.
 
 ### Creating a tab
 
-A new tab joins the window's native tab group through Ghostty's existing
-new-tab path and is assigned to the selected workspace. Its creation,
-terminal configuration, working directory inheritance, and initial focus
-follow Ghostty's existing behavior.
+A new tab is added to the selected workspace, after the selected tab or at
+the end following `window-new-tab-position`, and selected. Its terminal
+configuration, working directory inheritance, and initial focus follow
+Ghostty's existing behavior. Windows that can't have tabs (see 10.4) open a
+new window instead.
 
 ### Closing a tab
 
 Closing a tab uses Ghostty's existing close and process-confirmation behavior.
 
-When the visible tab closes, the workspace chooses the next tab before AppKit
-does: the tab to its right in the same workspace, else the tab to its left.
-Otherwise AppKit would select a neighbor in the shared tab group, which may
-belong to another workspace. If it was the workspace's last tab, the
-neighboring workspace is selected and the workspace is removed (8).
+When the visible tab closes, the tab to its right in the same workspace is
+selected, else the tab to its left. If it was the workspace's last tab, the
+neighboring workspace is selected and the workspace is removed (8). The
+window's last tab closes the window.
 
-The tab is removed from its workspace when it closes. Closed tabs may remain
-alive for undo, so membership is cleared explicitly rather than inferred from
-the window list.
+A terminal exiting in a tab that isn't shown closes without selecting it,
+unless it needs confirmation, in which case its tab is shown first.
+
+Undoing a close puts the tab back in its place, recreating its workspace if
+the close removed it. Until the undo expires, it keeps the tab's terminals
+alive.
 
 ### Reordering tabs
 
-A workspace's tab order is its tabs' order in the native tab group. Reordering
-a tab in the tab strip, by dragging it or with `move_tab`, moves its native
-tab window relative to the other tabs of the same workspace.
+Tabs are reordered within their workspace by dragging them in the tab strip
+or with `move_tab`.
 
 ### Splits
 
@@ -361,134 +344,52 @@ tabs, not individual panes.
 
 ### 10.1 Upstream strategy
 
-The project will be based on a pinned fork of Ghostty rather than on a
-separately installed Ghostty application.
-
-The implementation should favor:
-
-- New, isolated source files for workspace functionality
-  (`macos/Sources/Features/Workspaces/`).
-- Narrow hooks into Ghostty's existing window and tab lifecycle.
-- Reuse of existing actions, notifications, controllers, and restoration.
-- Minimal changes to terminal, renderer, PTY, and configuration code.
-- Regular, deliberate synchronization with a pinned upstream revision.
+The project is a fork of Ghostty. Workspace code lives in isolated files
+(`macos/Sources/Features/Workspaces/`) where practical, but changing
+Ghostty's window and tab code to fit the design is acceptable.
 
 ### 10.2 Runtime ownership
 
 The application continues to use one Ghostty application/runtime instance.
-Workspaces do not create additional Ghostty runtimes.
 
-Existing Ghostty objects retain their responsibilities:
-
-- `TerminalController` manages a terminal tab and its split tree.
+- `TerminalController` manages one application window and all of its tabs.
+  Its inherited `surfaceTree` is always the selected tab's split tree, so
+  Ghostty's split, focus, zoom, close, and clipboard logic works unchanged on
+  the visible tab.
+- `WorkspaceModel` holds the window's workspaces and `TerminalTab`s.
 - `Ghostty.SurfaceView` represents an individual terminal pane.
-- One `NSWindowTabGroup` per application window manages the native tab
-  windows of all its workspaces.
-- Ghostty's existing app object manages global terminal configuration and
-  callbacks.
+- The quick terminal is unchanged and has no tabs.
 
-Workspace code adds organization and navigation around those objects.
+### 10.3 Tabs and switching
 
-### 10.3 Workspace types
+A `TerminalTab` holds its split tree, its focused surface, and its title
+override, and publishes its title for the tab strip. The selected tab's tree
+is kept in sync with the controller's `surfaceTree`.
 
-```swift
-@MainActor
-final class WorkspaceWindowGroup: ObservableObject {
-    struct Workspace: Identifiable {
-        let id: UUID
-        var name: String
-    }
+Selecting a tab:
 
-    @Published private(set) var workspaces: [Workspace]
-    @Published private(set) var selectedID: UUID?
+1. Marks it selected in the model (and its workspace).
+2. Unfocuses the previous tab's surfaces and occludes them, so they stop
+   rendering.
+3. Assigns the tab's title override and split tree to the controller, which
+   puts its surfaces in the window.
+4. Focuses the tab's last focused surface.
 
-    /// The selected workspace's tabs, in native order, for the tab strip.
-    @Published private(set) var tabs: [Tab]
+Terminals of tabs that aren't shown keep running and receiving output. The
+base controller has hooks so they're still handled:
 
-    /// Runtime only: last-selected tab window per workspace.
-    private var lastSelectedTab: [UUID: Weak<NSWindow>]
-}
-```
+| Hook | Used for |
+| --- | --- |
+| `owns(_:)`, `allSurfaces` | Finding a surface's controller, quit and close confirmation, AppleScript, App Intents, the command palette. |
+| `revealSurface(_:)` | Selecting a surface's tab before focusing or presenting it. |
+| `revealSurfaces(of:)` | Selecting the right tab before undoing or redoing a split change. |
+| `closeHiddenSurface(_:withConfirmation:)` | A terminal in a hidden tab exiting. |
 
-The group does not store tabs. A workspace's tabs are derived on demand from
-the live `TerminalController`s whose membership points at the group and
-workspace, ordered by the native tab group.
+Windows use `tabbingMode = .disallowed`; AppKit native tabs are never used.
 
-Sidebar width and visibility belong to the group once they become adjustable
-(see 11 for their persistence).
+### 10.4 Window layout
 
-Runtime references to `TerminalController`, `NSWindow`, and Ghostty surfaces
-must not be stored in serialized records.
-
-### 10.4 Tab workspace membership
-
-Tabs do not receive a new persistent ID. Ghostty continues to identify a live
-tab through its existing `NSWindow` and `TerminalController`, while the native
-tab group provides ordering.
-
-At runtime each `TerminalController` owns a small observable membership: its
-`WorkspaceWindowGroup` and workspace ID. The sidebar and tab strip of every
-tab window observe it, so they appear as soon as the tab is assigned.
-
-A native tab group and a `WorkspaceWindowGroup` correspond one to one. The
-native tab group is the source of truth: AppKit can change it underneath the
-workspace layer (Merge All Windows, Move Tab to New Window, undo re-inserting
-tabs), so membership is reconciled against it whenever a tab is shown or
-becomes key, and after Merge All Windows. Reconciliation runs one event loop
-tick later, because callers such as undo show a window before inserting it
-into its tab group. It applies these rules to the tabs of one native tab
-group:
-
-- Tabs whose workspace group mostly lives in another native tab group split
-  off into a new workspace group, keeping their workspaces' names under new
-  IDs (Move Tab to New Window).
-- Workspace groups that meet in one native tab group merge into the group of
-  the selected tab, keeping their workspaces (Merge All Windows).
-- Tabs without membership join the selected workspace; if there is no group,
-  a new one is created (new windows and tabs).
-
-New Workspace assigns its tab explicitly. Undoing a tab or window close
-restores the tab's original membership before the window is shown,
-recreating the workspace (same ID and name) if the close removed it. A
-recreated workspace returns to its original position: after the nearest
-workspace that preceded it when it was closed. The undo state holds the
-workspace group strongly until the undo expires.
-
-For restoration, the minimum persistent information is encoded in each tab's
-existing `TerminalRestorableState`:
-
-```swift
-struct TerminalWorkspaceMembership: Codable {
-    var workspaceWindowGroupID: UUID
-    var workspaceID: UUID
-}
-```
-
-The tab's position within its workspace comes from its position in the
-restored native tab group, so no separate tab index is required.
-
-### 10.5 Workspace coordination hooks
-
-The group is kept consistent through a few hooks in Ghostty's existing
-lifecycle rather than a separate registry:
-
-| Event | Hook | Group responsibility |
-| --- | --- | --- |
-| Tab shown | `TerminalController.showWindow` | Reconcile with the native tab group. |
-| Tab becomes key | `windowDidBecomeKey` | Record last-selected tab; select its workspace; reconcile. |
-| Tab about to close | `TerminalWindow.close()` | Choose the next tab within the workspace (9). |
-| Tab closed | `windowWillClose` | Clear membership; remove an empty workspace. |
-| Tab order or labels change | `relabelTabs()` | Number tabs per workspace; refresh the tab strip. |
-| Windows merged | `TerminalWindow.mergeAllWindows` | Reconcile the merged tab group. |
-| Close undone | `TerminalController.init(with:)` | Restore the tab's original membership. |
-
-The group must degrade safely when AppKit changes the tab group
-unexpectedly. An unrecognized live tab is placed in the selected workspace
-rather than being discarded or closed.
-
-### 10.6 Stable workspace bar and window layout
-
-Each tab window's content is a split view controller:
+A window's content is a split view controller:
 
 - A native split-view sidebar item (full-height layout, fixed width) hosting
   the workspace bar.
@@ -496,127 +397,46 @@ Each tab window's content is a split view controller:
   area, and Ghostty's existing terminal container below it.
 
 The window uses a full-size content view so the sidebar extends under the
-titlebar. Ghostty's existing terminal view remains intact inside its
-container.
+titlebar. With a glass background, the terminal's glass covers the whole
+window and overhangs its edges, so its rim is clipped by the window rather
+than drawn inside it. The split view's per-column titlebar backgrounds are
+made transparent, so the title row is part of the same glass surface.
 
-With a glass background, the terminal's glass covers the whole window and
-overhangs its edges, so its rim is clipped by the window rather than drawn
-inside it. The titlebar draws no background over the terminal column (the
-split view's per-column titlebar backgrounds are made transparent), so the
-title row is part of the same glass surface. The sidebar keeps its native
-material.
-
-Workspaces require native tabbing. Windows that disallow tabbing (for
-example `macos-titlebar-style = hidden`) keep Ghostty's plain terminal
-layout with no sidebar or tab strip, and the workspace commands are disabled
-for them.
-
-AppKit implements every native tab as an `NSWindow` and does not expose a
-group-level content view, so each tab window hosts its own sidebar and tab
-strip, all rendering the same `WorkspaceWindowGroup`. Only the selected
-window's hosts are visible. They must not duplicate workspace state or
-perform per-host persistence. Because the sidebar has a fixed width and the
-state is shared, switching tabs or workspaces is visually indistinguishable
-from one persistent sidebar.
+Windows without a titlebar (`macos-titlebar-style = hidden`,
+`window-decoration = false`) keep Ghostty's plain terminal layout, have no
+tabs, and open new tabs and workspaces as new windows.
 
 The window's content size accounts for the sidebar, titlebar, and tab strip
 so that Ghostty's `window-width` and `window-height` still describe the
 terminal area.
 
-Switching tabs or workspaces must preserve:
+### 10.5 Tab strip
 
-- Sidebar visibility.
-- Sidebar width.
-- Selected workspace.
-- Scroll position where practical.
-
-### 10.7 Tab strip and the hidden native tab bar
-
-The native tab bar would show the tabs of every workspace, because they share
-one tab group. It is therefore hidden: when AppKit adds the tab bar's titlebar
-accessory view controller, Ghostty's `TerminalWindow` sets its `isHidden`,
-which also collapses its space in the titlebar.
-
-The tab strip replaces only the bar's presentation. Tabs remain native tab
-windows, and tab creation, selection, closing, key equivalents, and
-restoration continue to use the native tab group and Ghostty's existing code.
-Renaming a tab (Change Tab Title…, `Command-R` by default through
-`prompt_tab_title`) edits its title in place in the strip, which shows while
-a tab is renamed even if it's the workspace's only tab. The title is
-Ghostty's existing tab title override. Features the native bar provided that
-the strip must still reimplement: the tab context menu, tab colors, and bell
-indicators.
-
-### 10.8 AppKit constraints
-
-These behaviors were verified with standalone AppKit experiments and shaped
-the design above:
-
-- Ordering out a tabbed window removes it from its tab group; hiding only the
-  selected tab makes AppKit select and show another. A hidden tab group
-  cannot be kept intact, so per-workspace tab groups cannot be parked while
-  hidden.
-- Moving tabs into and out of a tab group is expensive (roughly 30 ms per
-  added tab and 70–140 ms per ordered-out tab in a debug build) and animates
-  the native tab bar, including a deferred layout pass. Animation suppression
-  reduces but does not remove the motion.
-- `NSWindow.toggleTabBar(_:)` cannot hide the tab bar once a group has two or
-  more tabs.
-- A split-view sidebar with full-height layout in a full-size content window
-  makes AppKit lay out titlebar content over the detail column only.
+The tab strip is SwiftUI, rendered once per window from the model. Renaming a
+tab (Change Tab Title…, `Command-R` by default through `prompt_tab_title`)
+edits its title in place in the strip, which shows while a tab is renamed
+even if it's the workspace's only tab.
 
 ## 11. State restoration
 
-Workspace persistence supplements Ghostty's existing terminal restoration. It
-does not replace it.
+Restoration extends Ghostty's existing per-window `TerminalRestorableState`
+(version 8). The selected tab's split tree is the state's existing
+`surfaceTree`, so older state still restores as one tab. New state also
+records each workspace's name, its tabs (split tree, focused surface, title
+override), and its selected tab. The window's selected tab's tree isn't
+repeated there, since decoding a tree creates its terminals; its workspace is
+the selected one.
 
-Because every tab of an application window is in one native tab group,
-Ghostty's existing restoration already restores all of a window's tabs
-together, in order. Workspace restoration only needs to reassign them.
+Sidebar visibility and width are runtime preferences only. Invalid workspace
+state restores the selected tab alone rather than failing.
 
-Persisted workspace state includes:
-
-- Workspace IDs, names, and ordering.
-- Workspace-window-group and workspace membership in each tab's existing
-  `TerminalRestorableState`.
-- Last-selected workspace and tab.
-
-Sidebar visibility and width are runtime preferences only in the initial
-release. They reset to application defaults when a new application window is
-created or restored.
-
-Workspace state should be stored in the application's normal Application
-Support location using a versioned format.
-
-On launch or window restoration:
-
-1. Workspace-window-group and workspace metadata is loaded.
-2. Ghostty restores each window's tab group, tabs, and split trees together
-   with each tab's `TerminalWorkspaceMembership`.
-3. Restored tabs are assigned to their workspace-window-group and workspace.
-4. Tabs with missing or invalid membership are assigned to a default
-   workspace.
-5. Workspace and tab selection are restored, with safe fallbacks to the first
-   available workspace and tab.
-
-Corrupt, missing, or incompatible workspace metadata must never prevent
-Ghostty from opening usable terminal windows.
-
-Undoing a tab or window close should restore tabs into their original
-workspace when it still exists.
+Undoing a window close restores all of its workspaces and tabs.
 
 ## 12. Process and rendering behavior
 
-Switching workspaces changes only which tab of the shared native tab group is
-selected. It does not create or destroy terminal surfaces.
-
-Background terminals continue running and receiving output. Rendering and
-occlusion remain governed by Ghostty and AppKit's existing tab visibility
-behavior: tabs of hidden workspaces are ordinary unselected tabs.
-
-The initial implementation will not support creating a terminal surface in a
-workspace without selecting that tab at least once. This avoids introducing a
-new headless or off-screen surface lifecycle.
+Switching tabs or workspaces does not create or destroy terminal surfaces.
+Terminals of tabs that aren't shown keep running and receiving output, but
+are occluded, so they don't render.
 
 ## 13. Error handling and recovery
 
@@ -636,18 +456,16 @@ The workspace layer must favor preserving terminals over preserving metadata.
 The workspace feature should add negligible overhead to normal terminal
 rendering.
 
-- Switching workspaces must cost no more than switching tabs. Workspace
-  operations must not move tabs into or out of the native tab group.
+- Switching workspaces must cost no more than switching tabs.
 - Sidebar and tab strip updates must not subscribe directly to terminal
   output streams.
 - Tab titles and working directories should update through existing,
-  event-driven Ghostty state (tab titles are observed from the tab window's
-  title).
+  event-driven Ghostty state (a tab observes its focused surface's title).
 - Sidebar state changes should occur on the main actor.
 - Structural coordination should happen only on events such as tab creation,
   closure, selection, movement, or restoration.
-- The number of sidebar and tab strip instances must not multiply observation
-  work for terminal content.
+- There is one sidebar and one tab strip per window, however many tabs it
+  has.
 
 ## 15. Accessibility
 
@@ -669,6 +487,8 @@ Ghostty's existing terminal surfaces.
 
 Implemented:
 
+- One `NSWindow` per application window holding all of its workspaces' tabs;
+  switching swaps split trees.
 - Sidebar with workspace list and selection; a Liquid Glass titlebar control
   with New Workspace and the sidebar toggle.
 - Tab strip with titles, per-workspace ⌘1–⌘9 labels, selection, close on
@@ -678,29 +498,36 @@ Implemented:
   dragging them out of the strip onto the sidebar.
 - Renaming tabs in place in the strip (`Command-R`).
 - New Workspace (`Command-N`), Next/Previous Workspace
-  (`Command-Option-]`/`[`), New Window moved to `Command-Shift-N`.
-- Workspace switching via the shared tab group.
+  (`Command-Option-]`/`[`), Go to Workspace (`Control-1`–`9`), New Window
+  moved to `Command-Shift-N`.
 - Per-workspace tab navigation, move-tab, Close Other Tabs, and Close Tabs to
   the Right.
-- Closing tabs and workspaces with in-workspace next-tab selection.
-- Reconciliation with native tab groups: undo restores tabs into their
-  original workspace; Merge All Windows merges workspace groups; Move Tab to
-  New Window splits the tab into its own workspace group.
-- New Workspace rolls back (closing the new terminal) if its tab cannot join
-  the tab group, and is unavailable for windows that disallow tabbing.
+- Closing tabs and workspaces with in-workspace next-tab selection; terminals
+  exiting in hidden tabs.
+- Undo of closing tabs and windows.
+- Restoration of workspaces and tabs.
 - Collapsible sidebar: View → Hide/Show Sidebar (`Command-B`) and a titlebar
-  sidebar button; state shared by the window group, not persisted.
+  sidebar button; not persisted.
+- AppleScript windows and tabs map to windows and `TerminalTab`s.
+- Terminals in hidden tabs: bells, notifications (clicking one selects its
+  tab), `set_tab_title`, and child-exit messages.
+- `move_tab_to_new_window` moves a tab (the same `TerminalTab`, with its
+  focus and title) into a new window, in a workspace named after the one it
+  left. It isn't undoable, and it clears the source window's undo history,
+  whose entries for the tab would act on the wrong window.
 
 Not yet implemented:
 
 - Workspace rename and close (with all-or-cancel confirmation).
-- Dragging tabs out of the application window; a Move to Workspace context
-  menu action.
-- Tab context menu, tab colors, and bell indicators in the tab strip.
+- Dragging tabs out of the application window, or between windows; moving a
+  tab into an existing window; a Move to Workspace context menu action.
+- Tab context menu, per-tab colors (the tab color is per window), and bell
+  indicators in the tab strip.
+- `prompt_tab_title` targeted at a hidden terminal (it renames the shown tab);
+  split actions on hidden terminals through AppleScript.
 - Adjustable sidebar width.
 - Workspace commands as Ghostty actions.
-- State restoration of workspaces.
-- AppKit's Window-menu Show Next/Previous Tab and Show All Tabs, which still
-  cycle through every workspace's tabs.
+- Removing Ghostty's now unused native tab code (tab bar accessories, the
+  `macos-titlebar-style = tabs` window styles, native tab context menus).
 - Native fullscreen and non-native titlebar styles have not been verified.
 - Accessibility review.
