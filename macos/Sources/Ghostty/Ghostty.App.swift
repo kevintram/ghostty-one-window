@@ -555,7 +555,9 @@ extension Ghostty {
             guard let uuidString = userInfo["surface"] as? String,
                   let uuid = UUID(uuidString: uuidString),
                   let surface = delegate?.findSurface(forUUID: uuid),
-                  let window = surface.window else { return false }
+                  // A surface in a tab that isn't shown has no window of its own.
+                  let window = surface.window ?? BaseTerminalController.controller(owning: surface)?.window
+            else { return false }
 
             // If we don't require focus then we're good!
             let requireFocus = userInfo["requireFocus"] as? Bool ?? true
@@ -1843,11 +1845,11 @@ extension Ghostty {
                 let titleOverride = title.isEmpty ? nil : title
                 guard let surface = target.target.surface else { return false }
                 guard let surfaceView = self.surfaceView(from: surface) else { return false }
-                guard let window = surfaceView.window,
-                      let controller = window.windowController as? BaseTerminalController
-                else { return false }
-                controller.titleOverride = titleOverride
-                return true
+                return MainActor.assumeIsolated {
+                    guard let controller = BaseTerminalController.controller(owning: surfaceView) else { return false }
+                    controller.setTitleOverride(titleOverride, for: surfaceView)
+                    return true
+                }
 
             default:
                 assertionFailure()
@@ -1864,9 +1866,11 @@ extension Ghostty {
             case GHOSTTY_TARGET_SURFACE:
                 guard let surface = target.target.surface else { return false }
                 guard let surfaceView = self.surfaceView(from: surface) else { return false }
-                // We handle this when the window is visible and timetime_ms is greater than 0,
-                // which will rule out exit codes on launch
-                guard surfaceView.window != nil, v.timetime_ms > 0 else { return false }
+                // We handle this when the surface belongs to a window (also when
+                // its tab isn't shown) and timetime_ms is greater than 0, which will
+                // rule out exit codes on launch
+                let owned = MainActor.assumeIsolated { BaseTerminalController.controller(owning: surfaceView) != nil }
+                guard owned, v.timetime_ms > 0 else { return false }
                 guard let config = (NSApplication.shared.delegate as? AppDelegate)?.ghostty.config else { return false }
                 surfaceView.setChildExitedMessage(.init(v, threshold: config.abnormalCommandExitRuntime))
                 return true

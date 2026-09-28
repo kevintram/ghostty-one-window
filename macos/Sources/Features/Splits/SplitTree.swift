@@ -1218,16 +1218,17 @@ extension SplitTree: Collection {
 
 // MARK: SplitTree Combine
 
-extension SplitTree {
-    /// Builds a publisher that emits current values for all leaf views keyed by view ID.
+extension Sequence where Element: Identifiable {
+    /// Builds a publisher that emits current values for all views keyed by view ID,
+    /// e.g. for the leaf views of a split tree.
     ///
-    /// The returned publisher emits a full `[ViewType.ID: Value]` snapshot whenever any leaf view
+    /// The returned publisher emits a full `[Element.ID: Value]` snapshot whenever any view
     /// publishes through the provided publisher key path.
     func valuesPublisher<Value>(
-        valueKeyPath: KeyPath<ViewType, Value>,
-        publisherKeyPath: KeyPath<ViewType, Published<Value>.Publisher>
-    ) -> AnyPublisher<[ViewType.ID: Value], Never> {
-        // Flatten the split tree into a list of current leaf views.
+        valueKeyPath: KeyPath<Element, Value>,
+        publisherKeyPath: KeyPath<Element, Published<Value>.Publisher>
+    ) -> AnyPublisher<[Element.ID: Value], Never> {
+        // Flatten the views into a list.
         let views = map { $0 }
         guard !views.isEmpty else {
             // If there are no leaves, immediately publish an empty snapshot.
@@ -1236,7 +1237,7 @@ extension SplitTree {
         }
 
         // Capture each view's current value up front.
-        // We key by `ViewType.ID` so updates can replace the correct entry later.
+        // We key by `Element.ID` so updates can replace the correct entry later.
         // This avoids waiting for all views to emit before consumers see data.
         let initial = Dictionary(uniqueKeysWithValues: views.map { view in
             (view.id, view[keyPath: valueKeyPath])
