@@ -5,7 +5,9 @@ import SwiftUI
 /// clicking elsewhere, or the window losing key status when switching apps,
 /// which ends the rename and removes the field. Escape cancels.
 struct InlineTitleField: View {
-    let placeholder: String
+    /// What the field edits, for accessibility. It isn't shown: an empty
+    /// field shows nothing.
+    let label: String
     let end: (_ title: String?) -> Void
 
     @State private var text: String
@@ -14,14 +16,14 @@ struct InlineTitleField: View {
 
     /// - Parameter end: Called once when editing ends, with the edited title
     ///   or nil if it was cancelled.
-    init(_ placeholder: String, title: String, end: @escaping (_ title: String?) -> Void) {
-        self.placeholder = placeholder
+    init(_ label: String, title: String, end: @escaping (_ title: String?) -> Void) {
+        self.label = label
         self.end = end
         _text = State(initialValue: title)
     }
 
     var body: some View {
-        TextField(placeholder, text: $text)
+        TextField(label, text: $text, prompt: Text(""))
             .textFieldStyle(.plain)
             .focused($isFocused)
             // Once the update that shows the field has settled: it can replace
