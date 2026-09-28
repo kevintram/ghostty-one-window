@@ -260,12 +260,14 @@ extension TerminalViewContainer {
     private static let glassOverhang: CGFloat = 16
 
     private var glassInsets: GlassInsets? {
-        guard let window, let themeFrameView = windowThemeFrameView else { return nil }
+        guard let themeFrameView = windowThemeFrameView else { return nil }
 
         // Stock layout: this view fills the window below the titlebar.
         guard extendsGlassBeyondWindow else {
             return NSEdgeInsets(top: themeFrameView.safeAreaInsets.top, left: 0, bottom: 0, right: 0)
         }
+
+        guard let window else { return nil }
 
         let frame = convert(bounds, to: nil)
         let overhang = Self.glassOverhang
