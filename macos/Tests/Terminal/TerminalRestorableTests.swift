@@ -6,7 +6,7 @@ import AppKit
 struct TerminalRestorableTests {
     @Test
     func areYouForgettingToAddMigrationTests() {
-        #expect(TerminalRestorableState.version == 7)
+        #expect(TerminalRestorableState.version == 8)
         #expect(TerminalRestorableState.minimumVersion == 5)
 
         #expect(QuickTerminalRestorableState.version == 1)
@@ -81,6 +81,7 @@ struct TerminalRestorableTests {
         #expect(v7.effectiveFullscreenMode == .native)
         #expect(v7.tabColor == .green)
         #expect(v7.titleOverride == "1.3.0")
+        #expect(v7.workspaces == nil)
         #expect(v7.surfaceTree.contains(where: { $0.id.uuidString == "5D580A7A-81EA-47C6-BB9A-AD4B1783E478" }))
         #expect(v7.surfaceTree.contains(where: { $0.id.uuidString == "96EA1189-7482-41BC-A6CD-26E5190E4BFA" }))
 
@@ -108,6 +109,38 @@ struct TerminalRestorableTests {
         #expect(v7Generic.titleOverride == "tip")
         #expect(v7Generic.surfaceTree.contains(where: { $0.id.uuidString == "953CE952-D91D-4D36-AC72-9D0F1F6BCE73" }))
         #expect(v7Generic.surfaceTree.contains(where: { $0.id.uuidString == "D3223569-2E01-4BC5-9DB2-DBFC3AFF46D1" }))
+    }
+
+    @MainActor
+    @Test func restoreTerminalWorkspacesV8() throws {
+        typealias State = TerminalRestorableState.InternalState<MockView>
+        let selected = try SplitTreeTests.makeHorizontalSplit()
+        let other = try SplitTreeTests.makeHorizontalSplit()
+        let state = DummyTerminalRestorableState(State(
+            focusedSurface: nil,
+            surfaceTree: selected.0,
+            effectiveFullscreenMode: nil,
+            tabColor: nil,
+            titleOverride: nil,
+            workspaces: [
+                .init(name: "One", tabs: [
+                    .init(surfaceTree: other.0, focusedSurface: other.2.id.uuidString, titleOverride: "renamed"),
+                    .init(surfaceTree: nil, focusedSurface: nil, titleOverride: nil),
+                ], selectedTab: 1),
+            ]))
+
+        let data = try archive(CodableBridge(state), className: "CodableBridge<Terminal>")
+        let v8 = try unarchive(data, className: "CodableBridge<Terminal>", as: CodableBridge<DummyTerminalRestorableState>.self)
+            .value.internalState
+        let workspace = try #require(v8.workspaces?.first)
+        #expect(workspace.name == "One")
+        #expect(workspace.selectedTab == 1)
+        #expect(workspace.tabs.count == 2)
+        #expect(workspace.tabs[0].titleOverride == "renamed")
+        #expect(workspace.tabs[0].focusedSurface == other.2.id.uuidString)
+        #expect(workspace.tabs[0].surfaceTree?.contains(where: { $0.id == other.1.id }) == true)
+        // The selected tab's tree is the top-level one, not repeated.
+        #expect(workspace.tabs[1].surfaceTree == nil)
     }
 }
 
