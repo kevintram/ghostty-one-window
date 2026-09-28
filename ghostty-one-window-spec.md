@@ -191,9 +191,26 @@ tab itself, which rejoins the strip under the pointer. Escape, or dropping
 anywhere else, returns the tab to where it was.
 
 Selecting a tab swaps its split tree into the window (see 10.3). Ghostty's
-tab navigation —
-`goto_tab` (index, next, previous, last), `move_tab`, Close Other Tabs, and
-Close Tabs to the Right — operates within the current workspace.
+tab navigation — `goto_tab` (index, next, previous, last), `move_tab`, Close
+Other Tabs, and Close Tabs to the Right — operates within the current
+workspace.
+
+#### Context menus
+
+Right-clicking a tab or a workspace row opens a context menu that acts on it
+without selecting it:
+
+- Tab: New Tab to the Right; Rename Tab…; Move to Workspace (the other
+  workspaces, or a New Workspace); Move to New Window; Close Tab, Close Other
+  Tabs, and Close Tabs to the Right.
+- Workspace: New Tab; Rename Workspace…; Close Workspace and Close Other
+  Workspaces.
+
+Items that would do nothing are disabled. Closing several tabs or workspaces
+asks once if any terminal has a running process, and one undo puts them all
+back, showing the tab that was shown. A new tab starts in the working
+directory of the tab it was added beside (or the workspace's current tab),
+and undoing it shows the tab that was shown before.
 
 
 ### 6.4 Multiple windows
@@ -521,6 +538,7 @@ Implemented:
   in the sidebar (double-click, context menu, `Command-Shift-R`).
 - Closing workspaces from the context menu or the Workspace menu, with one
   confirmation for all of their tabs and undo.
+- Context menus for tabs and workspaces (6.3).
 - New Workspace (`Command-N`), Next/Previous Workspace
   (`Command-Option-]`/`[`), Go to Workspace (`Control-1`–`9`), New Window
   moved to `Command-Shift-N`.
@@ -543,9 +561,9 @@ Implemented:
 Not yet implemented:
 
 - Dragging tabs out of the application window, or between windows; moving a
-  tab into an existing window; a Move to Workspace context menu action.
-- Tab context menu, per-tab colors (the tab color is per window), and bell
-  indicators in the tab strip.
+  tab into an existing window.
+- Per-tab colors (the tab color is per window) and bell indicators in the tab
+  strip.
 - `prompt_tab_title` targeted at a hidden terminal (it renames the shown tab);
   split actions on hidden terminals through AppleScript.
 - Adjustable sidebar width.

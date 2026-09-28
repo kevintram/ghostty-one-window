@@ -56,6 +56,7 @@ private struct TabStrip: View {
                 .zIndex(phase(of: tab) == nil ? 0 : 1)
                 // Clicks in the title field while renaming position the cursor.
                 .gesture(reorderGesture(for: tab), including: isRenaming(tab) ? .subviews : .all)
+                .contextMenu { menu(for: tab) }
             }
 
             Button {
@@ -101,6 +102,47 @@ private struct TabStrip: View {
             count: model.tabs.count,
             stride: widths.other + Self.spacing,
             draggedStride: widths.selected + Self.spacing)
+    }
+
+    /// The tab's context menu. It acts on the tab, which it doesn't select.
+    @ViewBuilder
+    private func menu(for tab: TerminalTab) -> some View {
+        let otherWorkspaces = model.workspaces.filter { !$0.tabs.contains { $0 === tab } }
+
+        Button("New Tab to the Right") {
+            controller.value?.newTab(after: tab)
+        }
+        Divider()
+        Button("Rename Tab…") {
+            controller.value?.beginRenamingTab(tab)
+        }
+        Menu("Move to Workspace") {
+            ForEach(otherWorkspaces) { workspace in
+                Button(workspace.name) {
+                    controller.value?.moveTab(tab, toWorkspace: workspace.id)
+                }
+            }
+            if !otherWorkspaces.isEmpty { Divider() }
+            Button("New Workspace") {
+                controller.value?.moveTabToNewWorkspace(tab)
+            }
+        }
+        Button("Move to New Window") {
+            controller.value?.moveTabToNewWindow(tab)
+        }
+        .disabled(model.allTabs.count < 2)
+        Divider()
+        Button("Close Tab") {
+            controller.value?.close(tab: tab)
+        }
+        Button("Close Other Tabs") {
+            controller.value?.closeOtherTabs(than: tab)
+        }
+        .disabled(model.otherTabs(than: tab).isEmpty)
+        Button("Close Tabs to the Right") {
+            controller.value?.closeTabs(rightOf: tab)
+        }
+        .disabled(model.tabs(rightOf: tab).isEmpty)
     }
 
     // MARK: Reordering

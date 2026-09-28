@@ -88,21 +88,28 @@ extension TerminalController {
     // MARK: Adding
 
     /// Adds a tab with a new terminal to a workspace, the selected one by
-    /// default, and selects it. It goes after the selected tab or at the
-    /// end, following `window-new-tab-position`.
+    /// default, and selects it. It goes right after `anchor` if given, else
+    /// after the selected tab or at the end, following
+    /// `window-new-tab-position`.
     @discardableResult
     func addTab(
         withBaseConfig config: Ghostty.SurfaceConfiguration? = nil,
-        inWorkspace id: UUID? = nil
+        inWorkspace id: UUID? = nil,
+        after anchor: TerminalTab? = nil
     ) -> TerminalTab? {
+        // Checked before the terminal starts: a tab left out of the model
+        // would keep it running unseen.
         guard let app = ghostty.app,
-              let id = id ?? workspaceModel.selectedWorkspaceID else { return nil }
+              let id = id ?? workspaceModel.selectedWorkspaceID,
+              workspaceModel.workspaceIndex(of: id) != nil else { return nil }
 
         let tab = TerminalTab(surfaceTree: .init(view: Ghostty.SurfaceView(app, baseConfig: config)))
         var index: Int?
-        if ghostty.config.windowNewTabPosition != "end",
-           id == workspaceModel.selectedWorkspaceID,
-           let current = workspaceModel.tabs.firstIndex(where: { $0 === selectedTab }) {
+        if let anchor, let location = workspaceModel.location(of: anchor) {
+            index = location.tab + 1
+        } else if ghostty.config.windowNewTabPosition != "end",
+                  id == workspaceModel.selectedWorkspaceID,
+                  let current = workspaceModel.tabs.firstIndex(where: { $0 === selectedTab }) {
             index = current + 1
         }
 
@@ -111,10 +118,97 @@ extension TerminalController {
         return tab
     }
 
+    /// Adds a tab to a workspace, right after `anchor` if given, starting in
+    /// the working directory of `anchor` (else the workspace's current tab).
+    /// Undoing it closes the tab.
+    @discardableResult
+    func newTab(inWorkspace id: UUID, after anchor: TerminalTab? = nil) -> TerminalTab? {
+        let source = anchor ?? workspaceModel.workspaces.first { $0.id == id }?.selectedTab
+        var config = Ghostty.SurfaceConfiguration()
+        config.workingDirectory = source?.focusedSurface?.pwd
+        let previous = selectedTab
+        guard let tab = addTab(withBaseConfig: config, inWorkspace: id, after: anchor) else { return nil }
+        registerUndoAddingTab(tab, previous: previous) { target in
+            target.newTab(inWorkspace: id, after: anchor)
+        }
+        return tab
+    }
+
+    /// Adds a tab right after the given one, in its workspace.
+    func newTab(after tab: TerminalTab) {
+        guard let workspace = workspaceModel.workspace(of: tab) else { return }
+        newTab(inWorkspace: workspace.id, after: tab)
+    }
+
+    /// Registers undo for adding a tab: closing it and showing `previous`,
+    /// the tab shown before it (see `undoAddingTab`), with `redo` adding it
+    /// again.
+    ///
+    /// If the user keeps the tab when asked, the undo is registered again
+    /// once this one is over (registered during it, it would be a redo), so
+    /// it can be retried.
+    func registerUndoAddingTab(
+        _ tab: TerminalTab,
+        previous: TerminalTab?,
+        redo: @escaping (TerminalController) -> Void
+    ) {
+        guard let undoManager else { return }
+        undoManager.setActionName("New Tab")
+        undoManager.registerUndo(
+            withTarget: self,
+            expiresAfter: undoExpiration
+        ) { target in
+            guard target.undoAddingTab(tab, previous: previous) else {
+                guard target.workspaceModel.contains(tab) else { return }
+                DispatchQueue.main.async {
+                    target.registerUndoAddingTab(tab, previous: previous, redo: redo)
+                }
+                return
+            }
+
+            undoManager.registerUndo(
+                withTarget: target,
+                expiresAfter: target.undoExpiration,
+                handler: redo)
+        }
+    }
+
+    /// Undoes adding a tab: shows the tab that was shown before it, then
+    /// closes it. Returns false if the tab stays: gone already, or kept by
+    /// the user.
+    ///
+    /// It runs inside the undo, so it must finish there: a running process
+    /// is confirmed with a modal alert rather than the usual sheet, and the
+    /// close registers no undo of its own.
+    private func undoAddingTab(_ tab: TerminalTab, previous: TerminalTab?) -> Bool {
+        guard workspaceModel.contains(tab) else { return false }
+
+        if tab.needsConfirmQuit {
+            let alert = NSAlert()
+            alert.messageText = "Close Tab?"
+            alert.informativeText = Self.closeTabWarning
+            alert.addButton(withTitle: "Close")
+            alert.addButton(withTitle: "Cancel")
+            alert.alertStyle = .warning
+            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        }
+
+        if let previous { selectTab(previous) }
+        undoManager?.disableUndoRegistration {
+            closeTabImmediately(tab)
+        }
+        return true
+    }
+
     // MARK: Closing
 
+    /// Why closing a tab with a running process is confirmed.
+    private static let closeTabWarning =
+        "The terminal still has a running process. If you close the tab the process will be killed."
+
     /// Closes a tab, asking for confirmation if any of its terminals has a
-    /// running process. The window's last tab closes the window.
+    /// running process. The window's last tab closes the window. It doesn't
+    /// select the tab.
     func close(tab: TerminalTab) {
         guard workspaceModel.contains(tab) else { return }
 
@@ -128,11 +222,11 @@ extension TerminalController {
             return
         }
 
-        // Show the tab being asked about.
-        selectTab(tab)
+        // Asked without selecting the tab, e.g. closing a background tab from
+        // its context menu, so the prompt names a tab that isn't shown.
         confirmClose(
-            messageText: "Close Tab?",
-            informativeText: "The terminal still has a running process. If you close the tab the process will be killed."
+            messageText: tab === selectedTab ? "Close Tab?" : "Close Tab “\(tab.title)”?",
+            informativeText: Self.closeTabWarning
         ) {
             self.closeTabImmediately(tab)
         }
@@ -150,23 +244,22 @@ extension TerminalController {
         }
 
         let workspace = workspaceModel.workspaces[location.workspace]
-        let wasSelected = tab === selectedTab
 
         // The undo keeps the tab, and so its terminals, alive until it expires.
         if let undoManager {
-            let order = workspaceModel.workspaces.map(\.id)
+            let placement = TabPlacement(
+                index: location.tab,
+                workspace: workspace.id,
+                customName: workspace.customName,
+                workspaceOrder: workspaceModel.workspaces.map(\.id),
+                wasShown: tab === selectedTab,
+                wasCurrent: workspace.selectedTab === tab)
             undoManager.setActionName("Close Tab")
             undoManager.registerUndo(
                 withTarget: self,
                 expiresAfter: undoExpiration
             ) { target in
-                target.reinsert(
-                    tab,
-                    at: location.tab,
-                    inWorkspace: workspace.id,
-                    customName: workspace.customName,
-                    workspaceOrder: order,
-                    select: wasSelected)
+                target.reinsert(tab, at: placement)
 
                 if registerRedo {
                     undoManager.registerUndo(
@@ -189,75 +282,117 @@ extension TerminalController {
     }
 
     /// Closes a workspace with all of its tabs, asking once if any of their
-    /// terminals has a running process. The window's last workspace closes
-    /// the window.
+    /// terminals has a running process. If it's the shown workspace, the
+    /// next workspace (else the previous one) is shown. The window's last
+    /// workspace closes the window.
     func close(workspace id: UUID) {
-        guard let workspace = workspaceModel.workspaces.first(where: { $0.id == id }) else { return }
-        guard workspaceModel.workspaces.count > 1 else {
+        guard let index = workspaceModel.workspaceIndex(of: id) else { return }
+        guard let neighbor = workspaceModel.neighborOfWorkspace(at: index) else {
             closeWindow(nil)
             return
         }
 
-        guard workspace.tabs.contains(where: \.needsConfirmQuit) else {
-            closeWorkspaceImmediately(id)
+        close(
+            workspaceModel.workspaces[index].tabs,
+            showing: neighbor.selectedTab,
+            actionName: "Close Workspace",
+            informativeText: "A terminal in this workspace still has a running process. If you close it, the process will be killed.")
+    }
+
+    /// Closes every workspace but one, with all of their tabs.
+    func closeOtherWorkspaces(than id: UUID) {
+        guard let kept = workspaceModel.workspaces.first(where: { $0.id == id }) else { return }
+        close(
+            workspaceModel.workspaces.filter { $0.id != id }.flatMap(\.tabs),
+            showing: kept.selectedTab,
+            actionName: "Close Other Workspaces",
+            informativeText: "A terminal in another workspace still has a running process. If you close it, the process will be killed.")
+    }
+
+    /// Closes the other tabs of the tab's workspace.
+    func closeOtherTabs(than tab: TerminalTab) {
+        close(
+            workspaceModel.otherTabs(than: tab),
+            showing: tab,
+            actionName: "Close Other Tabs",
+            informativeText: "At least one other tab still has a running process. If you close the tab the process will be killed.")
+    }
+
+    /// Closes the tabs to the right of the tab in its workspace.
+    func closeTabs(rightOf tab: TerminalTab) {
+        close(
+            workspaceModel.tabs(rightOf: tab),
+            showing: tab,
+            actionName: "Close Tabs to the Right",
+            informativeText: "At least one tab to the right still has a running process. If you close the tab the process will be killed.")
+    }
+
+    /// Closes several tabs as one action, asking once, titled after the
+    /// action, if any of their terminals has a running process.
+    private func close(
+        _ tabs: [TerminalTab],
+        showing replacement: TerminalTab?,
+        actionName: String,
+        informativeText: String
+    ) {
+        guard !tabs.isEmpty else { return }
+        guard tabs.contains(where: \.needsConfirmQuit) else {
+            closeImmediately(tabs, showing: replacement, actionName: actionName)
             return
         }
 
-        confirmClose(
-            messageText: "Close Workspace?",
-            informativeText: "A terminal in this workspace still has a running process. If you close it, the process will be killed."
-        ) {
-            self.closeWorkspaceImmediately(id)
+        confirmClose(messageText: "\(actionName)?", informativeText: informativeText) {
+            self.closeImmediately(tabs, showing: replacement, actionName: actionName)
         }
     }
 
-    /// Closes a workspace with all of its tabs, without confirmation. If
-    /// it's the shown workspace, the next workspace (else the previous one)
-    /// is selected first. The window's last workspace closes the window.
-    /// Undoing it puts the workspace back where it was, with its tabs.
-    func closeWorkspaceImmediately(_ id: UUID) {
-        guard let index = workspaceModel.workspaceIndex(of: id) else { return }
-        guard let neighbor = workspaceModel.neighborOfWorkspace(at: index) else {
+    /// Closes several tabs as one action, without confirmation. If the shown
+    /// tab is among them, `replacement` is shown first, so the closing tabs
+    /// aren't shown in turn. Workspaces left without tabs go. Undoing it puts
+    /// the tabs back where they were, recreating their workspaces, and shows
+    /// the tab that was shown.
+    private func closeImmediately(_ tabs: [TerminalTab], showing replacement: TerminalTab?, actionName: String) {
+        // Redone, some may already be gone.
+        let tabs = tabs.filter(workspaceModel.contains)
+        guard !tabs.isEmpty else { return }
+        guard tabs.count < workspaceModel.allTabs.count else {
             closeWindowImmediately()
             return
         }
 
-        let workspace = workspaceModel.workspaces[index]
-        let wasSelected = workspaceModel.selectedWorkspaceID == id
-
+        let shown = selectedTab
         undoManager?.beginUndoGrouping()
         defer { undoManager?.endUndoGrouping() }
 
         // Registered before the tabs close so that, undone in reverse, it runs
-        // once they're back: it reselects the tab that was shown, and makes
-        // the redo for the whole workspace (the tabs register none).
+        // once they're back: it shows the tab that was shown, and makes the
+        // redo for the whole action (the tabs register none).
         if let undoManager {
-            let shownTab = wasSelected ? workspace.selectedTab : nil
             undoManager.registerUndo(
                 withTarget: self,
                 expiresAfter: undoExpiration
             ) { target in
-                if let shownTab { target.selectTab(shownTab) }
+                if let shown { target.selectTab(shown) }
 
                 undoManager.registerUndo(
                     withTarget: target,
                     expiresAfter: target.undoExpiration
                 ) { target in
-                    target.closeWorkspaceImmediately(id)
+                    target.closeImmediately(tabs, showing: replacement, actionName: actionName)
                 }
             }
         }
 
-        // Moving to the neighbor first means none of the closing tabs is
-        // shown, so closing them doesn't show them in turn.
-        if wasSelected { selectWorkspace(neighbor.id) }
+        if let shown, let replacement, tabs.contains(where: { $0 === shown }) {
+            selectTab(replacement)
+        }
 
-        // Each tab's undo puts it back, the first one recreating the
-        // workspace; undone in reverse, they return in order.
-        for tab in workspace.tabs {
+        // Each tab's undo puts it back, recreating its workspace if it was
+        // gone; undone in reverse, they return in order.
+        for tab in tabs {
             closeTabImmediately(tab, registerRedo: false)
         }
-        undoManager?.setActionName("Close Workspace")
+        undoManager?.setActionName(actionName)
     }
 
     /// Takes a tab out of the window. If it's the shown tab, the tab to its
@@ -279,29 +414,43 @@ extension TerminalController {
         return workspaceModel.neighborOfWorkspace(at: location.workspace)?.selectedTab
     }
 
-    /// Puts a closed tab back, recreating its workspace if that was its
-    /// last tab, in its place in `workspaceOrder`.
-    private func reinsert(
-        _ tab: TerminalTab,
-        at index: Int,
-        inWorkspace id: UUID,
-        customName: String?,
-        workspaceOrder: [UUID],
-        select: Bool
-    ) {
+    /// Where a closed tab was, to put it back when the close is undone.
+    private struct TabPlacement {
+        let index: Int
+        let workspace: UUID
+
+        /// The workspace's custom name and the workspace order, to recreate
+        /// the workspace if the tab was its last.
+        let customName: String?
+        let workspaceOrder: [UUID]
+
+        /// Whether the tab was shown, or its workspace's current tab.
+        let wasShown: Bool
+        let wasCurrent: Bool
+    }
+
+    /// Puts a closed tab back where it was, recreating its workspace if that
+    /// was its last tab, after the nearest workspace that preceded it and
+    /// still exists. It's shown again, or its workspace's current tab again,
+    /// if it was.
+    private func reinsert(_ tab: TerminalTab, at placement: TabPlacement) {
         guard !workspaceModel.contains(tab) else { return }
 
+        let id = placement.workspace
         if workspaceModel.workspaceIndex(of: id) == nil {
-            // After the nearest workspace that preceded it and still exists.
-            let preceding = workspaceOrder.prefix { $0 != id }.reversed()
+            let preceding = placement.workspaceOrder.prefix { $0 != id }.reversed()
             let position = preceding.lazy
                 .compactMap { self.workspaceModel.workspaceIndex(of: $0) }
                 .first.map { $0 + 1 } ?? 0
-            workspaceModel.addWorkspace(id: id, customName: customName, at: position)
+            workspaceModel.addWorkspace(id: id, customName: placement.customName, at: position)
         }
 
-        workspaceModel.insert(tab, inWorkspace: id, at: index)
-        if select { selectTab(tab) }
+        workspaceModel.insert(tab, inWorkspace: id, at: placement.index)
+        if placement.wasShown {
+            selectTab(tab)
+        } else if placement.wasCurrent {
+            workspaceModel.makeCurrent(tab)
+        }
     }
 
     /// Closes a terminal of a tab that isn't shown, e.g. when its process
@@ -350,6 +499,12 @@ extension TerminalController {
         workspaceModel.transfer(tab, toWorkspace: id)
     }
 
+    /// Moves a tab into a new workspace, at the end, and follows it there.
+    func moveTabToNewWorkspace(_ tab: TerminalTab) {
+        guard workspaceModel.contains(tab) else { return }
+        moveTab(tab, toWorkspace: workspaceModel.addWorkspace())
+    }
+
     /// Moves a tab into a new window of its own, in a workspace named after
     /// the one it left. It stays the same tab, with its terminals, focus and
     /// title. Returns false if it's the window's only tab.
@@ -394,6 +549,12 @@ extension TerminalController {
     }
 
     // MARK: Renaming
+
+    /// Starts renaming a tab in the tab strip, which shows while it is.
+    func beginRenamingTab(_ tab: TerminalTab) {
+        guard workspaceModel.contains(tab) else { return }
+        workspaceModel.renaming = .tab(tab.id)
+    }
 
     /// Sets a tab's title override. The shown tab's goes through the
     /// controller, which also titles the window.

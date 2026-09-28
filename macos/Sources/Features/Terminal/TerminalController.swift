@@ -469,6 +469,7 @@ class TerminalController: BaseTerminalController {
         // so we have to bring it back out.
         if parent.isMiniaturized { parent.deminiaturize(self) }
 
+        let previous = parentController.selectedTab
         guard let tab = parentController.addTab(withBaseConfig: baseConfig) else { return nil }
         parent.makeKeyAndOrderFront(nil)
 
@@ -477,28 +478,8 @@ class TerminalController: BaseTerminalController {
         NSApp.activate(ignoringOtherApps: true)
 
         // Setup our undo
-        if let undoManager = parentController.undoManager {
-            undoManager.setActionName("New Tab")
-            undoManager.registerUndo(
-                withTarget: parentController,
-                expiresAfter: parentController.undoExpiration
-            ) { target in
-                // Close the tab when undoing
-                undoManager.disableUndoRegistration {
-                    target.close(tab: tab)
-                }
-
-                // Register redo action
-                undoManager.registerUndo(
-                    withTarget: ghostty,
-                    expiresAfter: target.undoExpiration
-                ) { ghostty in
-                    _ = TerminalController.newTab(
-                        ghostty,
-                        from: parent,
-                        withBaseConfig: baseConfig)
-                }
-            }
+        parentController.registerUndoAddingTab(tab, previous: previous) { _ in
+            _ = TerminalController.newTab(ghostty, from: parent, withBaseConfig: baseConfig)
         }
 
         return parentController
@@ -536,7 +517,7 @@ class TerminalController: BaseTerminalController {
 
     override func promptTabTitle() {
         guard supportsTabs, let tab = selectedTab else { return super.promptTabTitle() }
-        workspaceModel.renaming = .tab(tab.id)
+        beginRenamingTab(tab)
     }
 
     override func changeTabTitle(_ sender: Any) {
@@ -619,82 +600,6 @@ class TerminalController: BaseTerminalController {
             closeWindow(nil)
         } else {
             closeWindowImmediately()
-        }
-    }
-
-    private func closeOtherTabsImmediately() {
-        guard let selectedTab else { return }
-        let others = workspaceModel.tabs.filter { $0 !== selectedTab }
-        guard !others.isEmpty else { return }
-
-        // Start an undo grouping
-        if let undoManager {
-            undoManager.beginUndoGrouping()
-        }
-        defer {
-            undoManager?.endUndoGrouping()
-        }
-
-        // We must not register a redo, because it messes with our own redo
-        // that we register later.
-        for tab in others {
-            closeTabImmediately(tab, registerRedo: false)
-        }
-
-        if let undoManager {
-            undoManager.setActionName("Close Other Tabs")
-
-            // Reselect this tab and register the redo for the whole operation.
-            undoManager.registerUndo(
-                withTarget: self,
-                expiresAfter: undoExpiration
-            ) { target in
-                target.selectTab(selectedTab)
-
-                // Register redo action
-                undoManager.registerUndo(
-                    withTarget: target,
-                    expiresAfter: target.undoExpiration
-                ) { target in
-                    target.closeOtherTabsImmediately()
-                }
-            }
-        }
-    }
-
-    private func closeTabsOnTheRightImmediately() {
-        guard let selectedTab else { return }
-        let tabs = workspaceModel.tabs
-        guard let currentIndex = tabs.firstIndex(where: { $0 === selectedTab }) else { return }
-
-        let tabsToClose = tabs[(currentIndex + 1)...]
-        guard !tabsToClose.isEmpty else { return }
-
-        undoManager?.beginUndoGrouping()
-        defer {
-            undoManager?.endUndoGrouping()
-        }
-
-        for tab in tabsToClose {
-            closeTabImmediately(tab, registerRedo: false)
-        }
-
-        if let undoManager {
-            undoManager.setActionName("Close Tabs to the Right")
-
-            undoManager.registerUndo(
-                withTarget: self,
-                expiresAfter: undoExpiration
-            ) { target in
-                target.selectTab(selectedTab)
-
-                undoManager.registerUndo(
-                    withTarget: target,
-                    expiresAfter: target.undoExpiration
-                ) { target in
-                    target.closeTabsOnTheRightImmediately()
-                }
-            }
         }
     }
 
@@ -1014,43 +919,13 @@ class TerminalController: BaseTerminalController {
     }
 
     @IBAction func closeOtherTabs(_ sender: Any?) {
-        let others = workspaceModel.tabs.filter { $0 !== selectedTab }
-
-        // If we only have one tab then we have no other tabs to close
-        guard !others.isEmpty else { return }
-
-        // Check if we have to confirm close.
-        guard others.contains(where: \.needsConfirmQuit) else {
-            self.closeOtherTabsImmediately()
-            return
-        }
-
-        confirmClose(
-            messageText: "Close Other Tabs?",
-            informativeText: "At least one other tab still has a running process. If you close the tab the process will be killed."
-        ) {
-            self.closeOtherTabsImmediately()
-        }
+        guard let selectedTab else { return }
+        closeOtherTabs(than: selectedTab)
     }
 
     @IBAction func closeTabsOnTheRight(_ sender: Any?) {
-        let tabs = workspaceModel.tabs
-        guard let currentIndex = tabs.firstIndex(where: { $0 === selectedTab }) else { return }
-
-        let tabsToClose = tabs[(currentIndex + 1)...]
-        guard !tabsToClose.isEmpty else { return }
-
-        if !tabsToClose.contains(where: \.needsConfirmQuit) {
-            self.closeTabsOnTheRightImmediately()
-            return
-        }
-
-        confirmClose(
-            messageText: "Close Tabs on the Right?",
-            informativeText: "At least one tab to the right still has a running process. If you close the tab the process will be killed."
-        ) {
-            self.closeTabsOnTheRightImmediately()
-        }
+        guard let selectedTab else { return }
+        closeTabs(rightOf: selectedTab)
     }
 
     @IBAction func returnToDefaultSize(_ sender: Any?) {
@@ -1307,9 +1182,8 @@ extension TerminalController {
     override func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(closeTabsOnTheRight):
-            let tabs = workspaceModel.tabs
-            guard let currentIndex = tabs.firstIndex(where: { $0 === selectedTab }) else { return false }
-            return tabs.indices.contains { $0 > currentIndex }
+            guard let selectedTab else { return false }
+            return !workspaceModel.tabs(rightOf: selectedTab).isEmpty
 
         case #selector(selectNextWorkspace), #selector(selectPreviousWorkspace):
             return workspaceModel.workspaces.count > 1

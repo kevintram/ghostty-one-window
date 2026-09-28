@@ -87,6 +87,11 @@ struct Workspace: Identifiable {
     var selectedTab: TerminalTab? {
         tabs.first { $0.id == selectedTabID } ?? tabs.first
     }
+
+    /// The custom name, else the current tab's title.
+    @MainActor var name: String {
+        customName ?? selectedTab?.title ?? ""
+    }
 }
 
 /// The workspaces and tabs of one terminal window, and the state its sidebar
@@ -194,6 +199,17 @@ final class WorkspaceModel: ObservableObject {
         location(of: tab).map { workspaces[$0.workspace] }
     }
 
+    /// The other tabs of the tab's workspace.
+    func otherTabs(than tab: TerminalTab) -> [TerminalTab] {
+        workspace(of: tab)?.tabs.filter { $0 !== tab } ?? []
+    }
+
+    /// The tabs to the right of the tab in its workspace.
+    func tabs(rightOf tab: TerminalTab) -> [TerminalTab] {
+        guard let location = location(of: tab) else { return [] }
+        return Array(workspaces[location.workspace].tabs[(location.tab + 1)...])
+    }
+
     func contains(_ tab: TerminalTab) -> Bool {
         location(of: tab) != nil
     }
@@ -242,6 +258,13 @@ final class WorkspaceModel: ObservableObject {
         guard let location = location(of: tab) else { return }
         workspaces[location.workspace].selectedTabID = tab.id
         selectedWorkspaceID = workspaces[location.workspace].id
+    }
+
+    /// Makes the tab its workspace's current tab, the one shown when the
+    /// workspace is selected, without selecting the workspace.
+    func makeCurrent(_ tab: TerminalTab) {
+        guard let location = location(of: tab) else { return }
+        workspaces[location.workspace].selectedTabID = tab.id
     }
 
     /// Replaces the split tree of a tab that isn't shown. The shown tab's

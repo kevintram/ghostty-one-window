@@ -56,7 +56,7 @@ private struct WorkspaceListView: View {
                     // unless it has a custom name.
                     if let tab = workspace.selectedTab {
                         WorkspaceRow(
-                            customName: workspace.customName,
+                            workspace: workspace,
                             tab: tab,
                             isSelected: workspace.id == model.selectedWorkspaceID,
                             isDropTarget: workspace.id == dropTarget,
@@ -72,15 +72,7 @@ private struct WorkspaceListView: View {
                             .gesture(
                                 DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(workspace.id) },
                                 including: isRenaming ? .subviews : .all)
-                            .contextMenu {
-                                Button("Rename Workspace…") {
-                                    controller.value?.beginRenamingWorkspace(workspace.id)
-                                }
-                                Divider()
-                                Button("Close Workspace") {
-                                    controller.value?.close(workspace: workspace.id)
-                                }
-                            }
+                            .contextMenu { menu(for: workspace) }
                             .onDrop(
                                 of: [.ghosttyWorkspaceTab],
                                 delegate: TabDropDelegate(
@@ -95,6 +87,26 @@ private struct WorkspaceListView: View {
             .padding(.top, topInset)
         }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// The workspace's context menu. It acts on the workspace, which it
+    /// doesn't select.
+    @ViewBuilder
+    private func menu(for workspace: Workspace) -> some View {
+        Button("New Tab") {
+            controller.value?.newTab(inWorkspace: workspace.id)
+        }
+        Button("Rename Workspace…") {
+            controller.value?.beginRenamingWorkspace(workspace.id)
+        }
+        Divider()
+        Button("Close Workspace") {
+            controller.value?.close(workspace: workspace.id)
+        }
+        Button("Close Other Workspaces") {
+            controller.value?.closeOtherWorkspaces(than: workspace.id)
+        }
+        .disabled(model.workspaces.count < 2)
     }
 
     // MARK: Reordering
@@ -198,9 +210,10 @@ private struct TabDropDelegate: DropDelegate {
 /// A workspace row, styled like a sidebar list's own selection: highlighted
 /// edge to edge within the sidebar's 10pt inset, with the name in bold.
 private struct WorkspaceRow: View {
-    let customName: String?
+    let workspace: Workspace
 
-    /// The workspace's current tab, which names it without a custom name.
+    /// The workspace's current tab, observed since its title names the
+    /// workspace without a custom name.
     @ObservedObject var tab: TerminalTab
 
     let isSelected: Bool
@@ -209,7 +222,7 @@ private struct WorkspaceRow: View {
     let select: () -> Void
     let endRenaming: (_ name: String?) -> Void
 
-    private var name: String { customName ?? tab.title }
+    private var name: String { workspace.name }
 
     var body: some View {
         HStack(spacing: 6.5) {
