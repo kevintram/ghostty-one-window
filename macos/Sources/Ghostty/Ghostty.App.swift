@@ -1269,7 +1269,7 @@ extension Ghostty {
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
                     // See gotoTab for notes on this check.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    guard hasOtherTabs(surfaceView) else { return false }
 
                     NotificationCenter.default.post(
                         name: .ghosttyMoveTab,
@@ -1286,6 +1286,19 @@ extension Ghostty {
                 return true
         }
 
+        /// Whether the surface's workspace has other tabs to go or move to.
+        /// Tabs are drawn by the window rather than being native tabs, so
+        /// this asks its controller rather than its tab group.
+        private static func hasOtherTabs(_ surfaceView: SurfaceView) -> Bool {
+            // Actions are performed on the main thread.
+            MainActor.assumeIsolated {
+                guard let controller = BaseTerminalController.controller(owning: surfaceView) as? TerminalController else {
+                    return false
+                }
+                return controller.workspaceModel.tabs.count > 1
+            }
+        }
+
         private static func moveTabToNewWindow(
             _ app: ghostty_app_t,
             target: ghostty_target_s) -> Bool {
@@ -1298,11 +1311,14 @@ extension Ghostty {
                     guard let surface = target.target.surface else { return false }
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
-                    // See gotoTab for notes on this check. A lone tab is already
-                    // a window of its own, so there is nothing to move.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
-
-                    surfaceView.window?.moveTabToNewWindow(nil)
+                    // See gotoTab for notes on this check. A window's only tab
+                    // is already a window of its own, so there is nothing to move.
+                    let moved = MainActor.assumeIsolated {
+                        guard let controller = BaseTerminalController.controller(owning: surfaceView) as? TerminalController,
+                              let tab = controller.workspaceModel.tab(owning: surfaceView) else { return false }
+                        return controller.moveTabToNewWindow(tab)
+                    }
+                    guard moved else { return false }
 
                 default:
                     assertionFailure()
@@ -1326,7 +1342,7 @@ extension Ghostty {
 
                     // Similar to goto_split (see comment there) about our performability,
                     // we should make this more accurate later.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    guard hasOtherTabs(surfaceView) else { return false }
 
                     NotificationCenter.default.post(
                         name: Notification.ghosttyGotoTab,

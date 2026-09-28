@@ -659,7 +659,7 @@ class AppDelegate: NSObject,
 
     @MainActor @objc private func keyboardSelectionDidChange(_ notification: Notification) {
         syncMenuShortcuts(ghostty.config)
-        TerminalController.all.forEach { $0.relabelTabs() }
+        TerminalController.all.forEach { $0.updateTabShortcuts() }
     }
 
     @objc private func ghosttyBellDidRing(_ notification: Notification) {
@@ -804,7 +804,7 @@ class AppDelegate: NSObject,
         DispatchQueue.main.async {
             self.syncMenuShortcuts(config)
         }
-        TerminalController.all.forEach { $0.relabelTabs() }
+        TerminalController.all.forEach { $0.updateTabShortcuts() }
 
         // Update our badge since config can change what we show.
         syncDockBadge()

@@ -95,13 +95,9 @@ class TerminalWindow: NSWindow {
             self.configureTabContextMenuIfNeeded(menu)
         }
 
-        // This is required so that window restoration properly creates our tabs
-        // again. I'm not sure why this is required. If you don't do this, then
-        // tabs restore as separate windows.
-        tabbingMode = .preferred
-        DispatchQueue.main.async {
-            self.tabbingMode = .automatic
-        }
+        // Tabs are drawn inside the window (see TerminalController), never as
+        // native tabs.
+        tabbingMode = .disallowed
 
         // All new windows are based on the app config at the time of creation.
         guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
@@ -195,14 +191,6 @@ class TerminalWindow: NSWindow {
     override func close() {
         tabTitleEditor.finishEditing(commit: true)
         NotificationCenter.default.post(name: Self.terminalWillCloseNotification, object: self)
-
-        // Closing the selected tab makes AppKit select a neighboring tab,
-        // which may belong to another workspace. Let the workspace pick the
-        // next tab first.
-        if let terminalController {
-            terminalController.workspaceGroup?.tabWillClose(terminalController)
-        }
-
         super.close()
     }
 
@@ -250,18 +238,6 @@ class TerminalWindow: NSWindow {
         targetController.promptTabTitle()
     }
 
-    override func mergeAllWindows(_ sender: Any?) {
-        super.mergeAllWindows(sender)
-
-        // It takes an event loop cycle to merge all the windows so we set a
-        // short timer to relabel the tabs (issue #1902). The merged tabs
-        // bring their own workspace groups, which must merge too.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.terminalController?.reconcileWorkspaces()
-            self?.terminalController?.relabelTabs()
-        }
-    }
-
     override func addTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController) {
         super.addTitlebarAccessoryViewController(childViewController)
 
@@ -270,13 +246,6 @@ class TerminalWindow: NSWindow {
         // it. This has been verified to work on macOS 12 to 26
         if isTabBar(childViewController) {
             childViewController.identifier = Self.tabBarIdentifier
-
-            // The tab group holds the tabs of every workspace, so the
-            // native tab bar would show them all. Workspaces draw their own
-            // tab strip instead. Hiding the accessory also collapses its
-            // space in the titlebar.
-            childViewController.isHidden = true
-
             tabBarDidAppear()
         }
     }

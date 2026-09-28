@@ -2,10 +2,10 @@ import AppKit
 
 /// Follows a mouse drag app-wide from the press that began it.
 ///
-/// Pressing a tab or a workspace selects it, which shows another tab window
-/// (each tab is its own window), so the rest of the drag may be delivered to
-/// either window and the pressed view's own gesture can't follow it. The
-/// tracker follows it with an app-wide event monitor instead.
+/// Pressing a tab or a workspace selects it, which swaps the terminal and
+/// can re-render the pressed view, so the pressed view's own gesture can't
+/// be relied on to follow the rest of the drag. The tracker follows it with
+/// an app-wide event monitor instead.
 ///
 /// One drag is followed at a time. It's cancelled when another drag begins,
 /// when another press arrives before its release (the release was never
@@ -70,8 +70,7 @@ enum PressDragTracker {
         }
     }
 
-    /// The event's position on screen, comparable across the tab windows a
-    /// drag may be delivered to.
+    /// The event's position on screen.
     static func screenPoint(of event: NSEvent) -> NSPoint {
         guard let window = event.window else { return event.locationInWindow }
         return window.convertPoint(toScreen: event.locationInWindow)

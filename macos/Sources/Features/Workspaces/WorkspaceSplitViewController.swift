@@ -2,28 +2,29 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// The content of a terminal tab window: a full-height workspace sidebar
-/// beside a column with the workspace tab strip above the terminal.
+/// The content of a terminal window: a full-height workspace sidebar beside
+/// a column with the workspace tab strip above the terminal.
 ///
 /// The sidebar is a native split view sidebar item in a full-size content
 /// window, so it extends under the titlebar and the window buttons sit on
 /// top of it.
 final class WorkspaceSplitViewController: NSSplitViewController {
     let terminalContainer: TerminalViewContainer
-    private let membership: WorkspaceMembership
+    private weak var controller: TerminalController?
+    private let model: WorkspaceModel
     private var tabStripVisibility: AnyCancellable?
     private var sidebarCollapse: AnyCancellable?
     private let sidebarInsets = WorkspaceSidebarInsets()
 
-    /// Whether this window has applied its group's sidebar state yet. The
-    /// first time isn't animated, e.g. a new tab opening while the sidebar
-    /// is collapsed.
+    /// Whether the sidebar's collapsed state has been applied yet. The first
+    /// time isn't animated.
     private var appliedSidebarState = false
 
     private var sidebarItem: NSSplitViewItem? { splitViewItems.first }
 
-    init(membership: WorkspaceMembership, terminalContainer: TerminalViewContainer) {
-        self.membership = membership
+    init(controller: TerminalController, terminalContainer: TerminalViewContainer) {
+        self.controller = controller
+        self.model = controller.workspaceModel
         self.terminalContainer = terminalContainer
         super.init(nibName: nil, bundle: nil)
 
@@ -47,7 +48,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         splitView.dividerStyle = .thin
 
         let sidebarController = NSHostingController(
-            rootView: WorkspaceSidebarView(membership: membership, insets: sidebarInsets))
+            rootView: WorkspaceSidebarView(model: model, controller: .init(controller), insets: sidebarInsets))
         // Don't let SwiftUI's ideal size drive the window size.
         sidebarController.sizingOptions = []
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController)
@@ -56,14 +57,11 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         // after `canCollapse`, which resets it for sidebars.
         sidebar.canCollapseFromWindowResize = false
         sidebar.allowsFullHeightLayout = true
-        sidebar.minimumThickness = WorkspaceWindowGroup.sidebarWidth
-        sidebar.maximumThickness = WorkspaceWindowGroup.sidebarWidth
+        sidebar.minimumThickness = WorkspaceModel.sidebarWidth
+        sidebar.maximumThickness = WorkspaceModel.sidebarWidth
         addSplitViewItem(sidebar)
 
-        // Every tab window of the group follows the group's collapsed state.
-        sidebarCollapse = membership.$group
-            .compactMap { $0?.$isSidebarCollapsed }
-            .switchToLatest()
+        sidebarCollapse = model.$isSidebarCollapsed
             .removeDuplicates()
             .sink { [weak self] collapsed in
                 MainActor.assumeIsolated { self?.applySidebarState(collapsed: collapsed) }
@@ -81,26 +79,24 @@ final class WorkspaceSplitViewController: NSSplitViewController {
 
         // Added after the terminal so it draws above the terminal's glass
         // background, which extends up under the titlebar.
-        let tabStrip = NSHostingView(rootView: WorkspaceTabStripView(membership: membership))
+        let tabStrip = NSHostingView(rootView: WorkspaceTabStripView(model: model, controller: .init(controller)))
         tabStrip.sizingOptions = []
         tabStrip.translatesAutoresizingMaskIntoConstraints = false
         detail.view.addSubview(tabStrip)
 
         // Like the native tab bar, the strip is only shown with 2+ tabs, or
-        // while this window's tab is being renamed in it.
+        // while a tab is being renamed in it.
         let tabStripHeight = tabStrip.heightAnchor.constraint(equalToConstant: 0)
-        tabStripVisibility = membership.$group
-            .map { [membership] group -> AnyPublisher<Bool, Never> in
-                guard let group else { return Just(false).eraseToAnyPublisher() }
-                return group.$tabs.combineLatest(membership.$isRenamingTab)
-                    .map { tabs, isRenaming in tabs.count > 1 || isRenaming }
-                    .eraseToAnyPublisher()
+        tabStripVisibility = model.$workspaces
+            .combineLatest(model.$selectedWorkspaceID, model.$renamingTabID)
+            .map { workspaces, selectedID, renamingID in
+                let tabs = workspaces.first { $0.id == selectedID }?.tabs.count ?? 0
+                return tabs > 1 || renamingID != nil
             }
-            .switchToLatest()
             .removeDuplicates()
             .sink { [weak tabStrip] visible in
                 MainActor.assumeIsolated {
-                    tabStripHeight.constant = visible ? WorkspaceWindowGroup.tabStripHeight : 0
+                    tabStripHeight.constant = visible ? WorkspaceModel.tabStripHeight : 0
                     tabStrip?.isHidden = !visible
                 }
             }
@@ -131,9 +127,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
 
         // The sidebar extends under the titlebar, so its content starts
         // below it. That's measured from the window rather than taken from
-        // SwiftUI's safe area, which has been seen stale by 10pt in one of a
-        // group's windows (likely after moving between displays), shifting
-        // the sidebar when switching to that tab.
+        // SwiftUI's safe area, which has been seen stale by 10pt (likely
+        // after moving between displays).
         if let window = view.window {
             let titlebarHeight = window.frame.height - window.contentLayoutRect.maxY
             if sidebarInsets.top != titlebarHeight { sidebarInsets.top = titlebarHeight }
@@ -145,15 +140,10 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         installSidebarControls()
     }
 
-    /// Collapsing is shared by the group, so the standard action (View menu,
-    /// ⌘B, the titlebar button) toggles the group's state rather than just
-    /// this window's sidebar.
+    /// The standard action (View menu, ⌘B, the titlebar button) toggles the
+    /// model's state, which the sidebar follows.
     override func toggleSidebar(_ sender: Any?) {
-        guard let group = membership.group else {
-            super.toggleSidebar(sender)
-            return
-        }
-        group.toggleSidebar()
+        model.isSidebarCollapsed.toggle()
     }
 
     override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
@@ -164,14 +154,12 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         return super.validateUserInterfaceItem(item)
     }
 
-    /// Animates only in the key window, the tab being toggled; other tabs
-    /// (and a window's first state) change instantly so switching tabs
-    /// never animates.
+    /// Animates, except for the window's first state.
     private func applySidebarState(collapsed: Bool) {
         defer { appliedSidebarState = true }
         guard let sidebarItem, sidebarItem.isCollapsed != collapsed else { return }
 
-        if appliedSidebarState, view.window?.isKeyWindow == true {
+        if appliedSidebarState, view.window?.isVisible == true {
             sidebarItem.animator().isCollapsed = collapsed
         } else {
             sidebarItem.isCollapsed = collapsed
@@ -189,15 +177,11 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         else { return }
 
         let controls = NSHostingView(rootView: SidebarControls(
-            membership: membership,
+            model: model,
             newWorkspace: { [weak self] in
-                // Show the sidebar so the new workspace appears in it, without
-                // animating: switching to the new workspace's tab makes AppKit
-                // copy this window's divider position to it, which would
-                // still be collapsed mid-animation.
-                self?.sidebarItem?.isCollapsed = false
-                self?.membership.group?.showSidebar()
-                NSApp.sendAction(#selector(TerminalController.newWorkspace(_:)), to: nil, from: nil)
+                // Show the sidebar so the new workspace appears in it.
+                self?.model.isSidebarCollapsed = false
+                self?.controller?.newWorkspace(nil)
             },
             toggleSidebar: { [weak self] in
                 self?.toggleSidebar(nil)
@@ -217,7 +201,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
 /// New Workspace and the sidebar toggle as one Liquid Glass control in the
 /// titlebar.
 private struct SidebarControls: View {
-    @ObservedObject var membership: WorkspaceMembership
+    let model: WorkspaceModel
     let newWorkspace: () -> Void
     let toggleSidebar: () -> Void
 
@@ -225,12 +209,7 @@ private struct SidebarControls: View {
         glass(HStack(spacing: 0) {
             button("rectangle.stack.badge.plus", action: newWorkspace)
                 .help("New workspace")
-            if let group = membership.group {
-                SidebarToggle(group: group, button: button("sidebar.left", action: toggleSidebar))
-            } else {
-                button("sidebar.left", action: toggleSidebar)
-                    .help("Hide sidebar")
-            }
+            SidebarToggle(model: model, button: button("sidebar.left", action: toggleSidebar))
         })
         .padding(.leading, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -260,13 +239,13 @@ private struct SidebarControls: View {
     }
 }
 
-/// The sidebar toggle, with a tooltip that follows the group's collapsed state.
+/// The sidebar toggle, with a tooltip that follows the collapsed state.
 private struct SidebarToggle<Button: View>: View {
-    @ObservedObject var group: WorkspaceWindowGroup
+    @ObservedObject var model: WorkspaceModel
     let button: Button
 
     var body: some View {
-        button.help(group.isSidebarCollapsed ? "Show sidebar" : "Hide sidebar")
+        button.help(model.isSidebarCollapsed ? "Show sidebar" : "Hide sidebar")
     }
 }
 
@@ -305,7 +284,7 @@ private final class WorkspaceSplitView: NSSplitView {
         }
 
         return NSSize(
-            width: size.width + (sidebarItem?.isCollapsed ?? false ? 0 : dividerThickness + WorkspaceWindowGroup.sidebarWidth),
+            width: size.width + (sidebarItem?.isCollapsed ?? false ? 0 : dividerThickness + WorkspaceModel.sidebarWidth),
             height: size.height + safeAreaInsets.top + (tabStripHeight?.constant ?? 0))
     }
 }

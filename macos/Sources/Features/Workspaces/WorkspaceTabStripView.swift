@@ -1,58 +1,60 @@
 import Combine
 import SwiftUI
 
-/// The tab strip above the terminal. It replaces the native tab bar, which
-/// would show the tabs of every workspace since they share one tab group.
-///
-/// The tabs are still native: each is a window in the logical window's
-/// `NSWindowTabGroup`. This only draws the selected workspace's tabs and
-/// forwards actions.
+/// The tab strip above the terminal, showing the selected workspace's tabs.
 struct WorkspaceTabStripView: View {
-    @ObservedObject var membership: WorkspaceMembership
+    @ObservedObject var model: WorkspaceModel
+
+    /// Performs the strip's actions. Weak, since the controller owns the
+    /// window this is in.
+    let controller: Weak<TerminalController>
 
     var body: some View {
-        if let group = membership.group {
-            TabStrip(group: group, membership: membership)
-        } else {
-            Color.clear
-        }
+        TabStrip(model: model, controller: controller)
     }
 }
 
 private struct TabStrip: View {
-    @ObservedObject var group: WorkspaceWindowGroup
+    @ObservedObject var model: WorkspaceModel
+    let controller: Weak<TerminalController>
 
-    /// The membership of the tab whose window shows this strip.
-    @ObservedObject var membership: WorkspaceMembership
+    private typealias Drag = WorkspaceModel.TabDrag
 
-    private typealias Drag = WorkspaceWindowGroup.TabDrag
-
-    private var drag: Drag? { group.tabDrag }
+    private var drag: Drag? { model.tabDrag }
 
     /// The strip's width, which the tabs share (see `tabWidths`).
     @State private var width: CGFloat = 0
 
     private static let spacing: CGFloat = 4
-    private static let inset = (WorkspaceWindowGroup.tabStripHeight - 24) / 2
+    private static let inset = (WorkspaceModel.tabStripHeight - 24) / 2
     private static let newTabWidth: CGFloat = 24
     private static let slideDuration = 0.15
     private static let slide = Animation.easeOut(duration: slideDuration)
 
     var body: some View {
         // A tab dragged out of the strip leaves it until the drag ends.
-        let tabs = group.tabs.filter { phase(of: $0) != .draggingOut }
-        let widths = tabWidths(count: tabs.count, includingSelected: tabs.contains(where: \.isSelected))
+        let allTabs = model.tabs
+        let selected = model.selectedTab
+        let tabs = allTabs.filter { phase(of: $0) != .draggingOut }
+        let widths = tabWidths(count: tabs.count, includingSelected: tabs.contains { $0 === selected })
+
+        // Shortcuts number the tabs in the workspace, including a dragged out one.
+        let shortcuts = Dictionary(uniqueKeysWithValues: zip(allTabs.map(\.id), model.tabShortcuts))
 
         HStack(spacing: Self.spacing) {
             ForEach(tabs) { tab in
                 TabButton(
                     tab: tab,
-                    width: tab.isSelected ? widths.selected : widths.other,
+                    isSelected: tab === selected,
+                    shortcut: shortcuts[tab.id] ?? nil,
+                    width: tab === selected ? widths.selected : widths.other,
                     isRenaming: isRenaming(tab)
                 ) { title in
-                    controller(of: tab)?.endRenamingTab(title: title)
+                    controller.value?.endRenamingTab(tab, title: title)
                 } select: {
-                    if let window = tab.window { group.selectTab(window) }
+                    controller.value?.selectTab(tab)
+                } close: {
+                    controller.value?.close(tab: tab)
                 }
                 .offset(x: offset(of: tab))
                 // The dragged tab tracks the pointer; the others slide.
@@ -63,7 +65,7 @@ private struct TabStrip: View {
             }
 
             Button {
-                NSApp.sendAction(#selector(TerminalController.newTab(_:)), to: nil, from: nil)
+                controller.value?.newTab(nil)
             } label: {
                 Image(systemName: "plus")
                     .frame(width: Self.newTabWidth, height: 24)
@@ -76,7 +78,7 @@ private struct TabStrip: View {
         // Measure the strip's width, not its content's: the tabs are sized
         // from it, so letting them feed back into it would never settle.
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: WorkspaceWindowGroup.tabStripHeight)
+        .frame(height: WorkspaceModel.tabStripHeight)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .contentShape(Rectangle())
         .onDrop(of: [.ghosttyWorkspaceTab], delegate: self)
@@ -100,9 +102,9 @@ private struct TabStrip: View {
     /// The tabs' slots with all of them in the strip. The dragged tab is the
     /// selected one, since pressing a tab selects it.
     private var slots: ReorderSlots {
-        let widths = tabWidths(count: group.tabs.count, includingSelected: true)
+        let widths = tabWidths(count: model.tabs.count, includingSelected: true)
         return ReorderSlots(
-            count: group.tabs.count,
+            count: model.tabs.count,
             stride: widths.other + Self.spacing,
             draggedStride: widths.selected + Self.spacing)
     }
@@ -111,92 +113,88 @@ private struct TabStrip: View {
 
     // Pressing a tab selects it right away, like a native tab, so a click
     // is just a drag that doesn't go anywhere. Dragging moves the tab with
-    // the pointer while the tabs it passes slide into its place. The native
-    // tab only moves on release.
+    // the pointer while the tabs it passes slide into its place. The tab
+    // only moves in the model on release.
     //
-    // Selecting shows another tab window, so the rest of the drag is
-    // followed by `PressDragTracker` and drawn from the group's shared
-    // `tabDrag`.
+    // The rest of the drag is followed by `PressDragTracker` and drawn from
+    // the model's `tabDrag`.
     //
     // Dragging a tab out of the strip hands off to a system drag, which the
     // sidebar's workspace rows accept (see `WorkspaceTabDragOut`). Dragged
     // back over the strip, the tab rejoins it under the pointer until it's
     // dropped or leaves again.
 
-    private func reorderGesture(for tab: WorkspaceWindowGroup.Tab) -> some Gesture {
+    private func reorderGesture(for tab: TerminalTab) -> some Gesture {
         // Only the press matters; the tracker follows the rest.
         DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(tab) }
     }
 
-    private func beginDrag(_ tab: WorkspaceWindowGroup.Tab) {
+    private func beginDrag(_ tab: TerminalTab) {
         // The gesture also reports every move; only the press begins a drag.
         guard let press = NSApp.currentEvent,
               press.type == .leftMouseDown,
-              group.tabDrag == nil || group.tabDrag?.phase == .following,
-              let window = tab.window,
+              model.tabDrag == nil || model.tabDrag?.phase == .following,
               let from = index(of: tab.id) else { return }
 
-        if window.tabGroup?.selectedWindow != window { group.selectTab(window) }
-        group.tabDrag = Drag(id: tab.id)
+        controller.value?.selectTab(tab)
+        model.tabDrag = Drag(id: tab.id)
 
         // The tabs can't change width during the drag, so capture the layout.
-        let group = group
+        let model = model
         let slots = slots
         let host = Self.stripHost(at: press)
 
-        PressDragTracker.begin(from: press) { [weak group, weak window, weak host] event, translation in
-            guard let group else { return false }
-            guard let window else {
+        PressDragTracker.begin(from: press) { [weak model, weak tab, weak host] event, translation in
+            guard let model else { return false }
+            guard let tab, model.contains(tab) else {
                 // The tab is gone.
-                group.tabDrag = nil
+                model.tabDrag = nil
                 return false
             }
 
             // Pulled out of the strip: drag it on as a system drag.
             if let host, let strip = host.window?.convertToScreen(host.convert(host.bounds, to: nil)),
                !strip.insetBy(dx: 0, dy: -Self.detachDistance).contains(PressDragTracker.screenPoint(of: event)) {
-                withAnimation(Self.slide) { group.tabDrag = Drag(id: tab.id, phase: .draggingOut) }
-                WorkspaceTabDragOut.begin(window, in: group, from: host, with: event)
+                withAnimation(Self.slide) { model.tabDrag = Drag(id: tab.id, phase: .draggingOut) }
+                WorkspaceTabDragOut.begin(tab, in: model, from: host, with: event)
                 return false
             }
 
-            group.tabDrag = Drag(id: tab.id, offset: slots.clamped(translation.width, from: from))
+            model.tabDrag = Drag(id: tab.id, offset: slots.clamped(translation.width, from: from))
             return true
-        } released: { [weak group, weak window] translation in
-            guard let group else { return }
-            guard let window else {
+        } released: { [weak model, weak tab] translation in
+            guard let model else { return }
+            guard let tab, model.contains(tab) else {
                 // The tab is gone.
-                group.tabDrag = nil
+                model.tabDrag = nil
                 return
             }
             let to = slots.destination(from: from, offset: slots.clamped(translation.width, from: from))
-            Self.settle(tab.id, window: window, from: from, to: to, stride: slots.stride, in: group)
-        } cancelled: { [weak group] in
+            Self.settle(tab, from: from, to: to, stride: slots.stride, in: model)
+        } cancelled: { [weak model] in
             // Ends the drag without moving the tab, so it slides back.
-            group?.tabDrag = nil
+            model?.tabDrag = nil
         }
     }
 
-    /// Settles the dragged tab into its slot, then moves the native tab.
-    /// Moving it re-inserts its window in the tab group, which would disrupt
-    /// an animation in flight, but by then the strip already looks like the
-    /// new order and nothing needs to animate.
+    /// Settles the dragged tab into its slot, then moves the tab. By then
+    /// the strip already looks like the new order and nothing needs to
+    /// animate.
     private static func settle(
-        _ id: ObjectIdentifier,
-        window: NSWindow,
+        _ tab: TerminalTab,
         from: Int,
         to: Int,
         stride: CGFloat,
-        in group: WorkspaceWindowGroup
+        in model: WorkspaceModel
     ) {
-        group.tabDrag = Drag(id: id, offset: CGFloat(to - from) * stride, phase: .settling)
-        DispatchQueue.main.asyncAfter(deadline: .now() + slideDuration) { [weak group, weak window] in
-            guard let group else { return }
+        model.tabDrag = Drag(id: tab.id, offset: CGFloat(to - from) * stride, phase: .settling)
+        DispatchQueue.main.asyncAfter(deadline: .now() + slideDuration) { [weak model, weak tab] in
+            guard let model else { return }
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
-                if let window { group.moveTab(window, to: to) }
-                group.tabDrag = nil
+                if let tab { model.moveTab(tab, to: to) }
+                model.tabDrag = nil
             }
         }
     }
@@ -212,12 +210,12 @@ private struct TabStrip: View {
         return sequence(first: hit, next: \.superview).first { $0 is NSHostingView<WorkspaceTabStripView> }
     }
 
-    private func index(of id: ObjectIdentifier) -> Int? {
-        group.tabs.firstIndex { $0.id == id }
+    private func index(of id: UUID) -> Int? {
+        model.tabs.firstIndex { $0.id == id }
     }
 
     /// How far the tab is drawn from its slot during a drag.
-    private func offset(of tab: WorkspaceWindowGroup.Tab) -> CGFloat {
+    private func offset(of tab: TerminalTab) -> CGFloat {
         guard let drag,
               drag.phase != .draggingOut,
               let from = index(of: drag.id),
@@ -225,26 +223,21 @@ private struct TabStrip: View {
         return slots.offset(of: index, draggingFrom: from, by: drag.offset)
     }
 
-    /// Whether the tab's title is being edited in this strip, which only
-    /// happens in the tab's own window.
-    private func isRenaming(_ tab: WorkspaceWindowGroup.Tab) -> Bool {
-        membership.isRenamingTab && controller(of: tab)?.workspaceMembership === membership
-    }
-
-    private func controller(of tab: WorkspaceWindowGroup.Tab) -> TerminalController? {
-        tab.window?.windowController as? TerminalController
+    /// Whether the tab's title is being edited in the strip.
+    private func isRenaming(_ tab: TerminalTab) -> Bool {
+        model.renamingTabID == tab.id
     }
 
     /// The drag phase of the tab, if it's the one being dragged.
-    private func phase(of tab: WorkspaceWindowGroup.Tab) -> Drag.Phase? {
+    private func phase(of tab: TerminalTab) -> Drag.Phase? {
         drag?.id == tab.id ? drag?.phase : nil
     }
 }
 
 // MARK: Dragging back in
 
-// Drops only come from a tab dragged out of this group's strip; other
-// groups' strips have no drag.
+// Drops only come from a tab dragged out of this window's strip; other
+// windows' strips have no drag.
 extension TabStrip: DropDelegate {
     func validateDrop(info: DropInfo) -> Bool {
         drag.map { $0.phase != .settling } ?? false
@@ -261,15 +254,13 @@ extension TabStrip: DropDelegate {
 
     func dropExited(info: DropInfo) {
         guard let drag, drag.phase == .following else { return }
-        withAnimation(Self.slide) { group.tabDrag = Drag(id: drag.id, phase: .draggingOut) }
+        withAnimation(Self.slide) { model.tabDrag = Drag(id: drag.id, phase: .draggingOut) }
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard let drag,
-              let from = index(of: drag.id),
-              let window = group.tabs[from].window else { return false }
+        guard let drag, let from = index(of: drag.id) else { return false }
         let to = slots.destination(from: from, offset: drag.offset)
-        Self.settle(drag.id, window: window, from: from, to: to, stride: slots.stride, in: group)
+        Self.settle(model.tabs[from], from: from, to: to, stride: slots.stride, in: model)
         return true
     }
 
@@ -285,43 +276,32 @@ extension TabStrip: DropDelegate {
         // Rejoining the strip makes room for it; following it doesn't animate.
         let following = Drag(id: drag.id, offset: offset)
         if drag.phase == .draggingOut {
-            withAnimation(Self.slide) { group.tabDrag = following }
+            withAnimation(Self.slide) { model.tabDrag = following }
         } else {
-            group.tabDrag = following
+            model.tabDrag = following
         }
     }
 }
 
 private struct TabButton: View {
-    let tab: WorkspaceWindowGroup.Tab
+    @ObservedObject var tab: TerminalTab
+    let isSelected: Bool
+    let shortcut: String?
     let width: CGFloat
     let isRenaming: Bool
     let endRenaming: (_ title: String?) -> Void
     let select: () -> Void
+    let close: () -> Void
 
-    @State private var title: String
     @State private var hovering = false
     @ObservedObject private var commandKey = CommandKeyState.shared
 
-    init(
-        tab: WorkspaceWindowGroup.Tab,
-        width: CGFloat,
-        isRenaming: Bool,
-        endRenaming: @escaping (_ title: String?) -> Void,
-        select: @escaping () -> Void
-    ) {
-        self.tab = tab
-        self.width = width
-        self.isRenaming = isRenaming
-        self.endRenaming = endRenaming
-        self.select = select
-        _title = State(initialValue: tab.window?.title ?? "")
-    }
+    private var title: String { tab.title }
 
     var body: some View {
         content
             .font(.system(size: 12))
-            .foregroundStyle(tab.isSelected ? .primary : .secondary)
+            .foregroundStyle(isSelected ? .primary : .secondary)
             .frame(width: width, height: 24)
             .clipped()
             .background { background }
@@ -329,14 +309,13 @@ private struct TabButton: View {
             .animation(.easeOut(duration: 0.12), value: showsShortcut)
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
-            .onReceive(titlePublisher) { title = $0 }
             // The full title, which narrow tabs cut short or leave out.
             .help(title)
             // One button for VoiceOver, except while renaming, when the title
             // field must stay reachable.
             .accessibilityElement(children: isRenaming ? .contain : .combine)
             .accessibilityLabel(title)
-            .accessibilityAddTraits(isRenaming ? [] : tab.isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAddTraits(isRenaming ? [] : isSelected ? [.isButton, .isSelected] : .isButton)
             // Pointer selection happens in the strip's drag gesture, on press.
             .accessibilityAction { select() }
     }
@@ -403,7 +382,7 @@ private struct TabButton: View {
     /// button in its place when hovering the selected tab.
     @ViewBuilder
     private var iconOrClose: some View {
-        if tab.isSelected && hovering {
+        if isSelected && hovering {
             closeButton
         } else {
             icon
@@ -414,7 +393,7 @@ private struct TabButton: View {
     /// pushing the title aside by however wider it is.
     private var icon: some View {
         Group {
-            if showsShortcut, let shortcut = tab.shortcut {
+            if showsShortcut, let shortcut {
                 Text(shortcut)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
@@ -439,9 +418,7 @@ private struct TabButton: View {
             if isRenaming {
                 // Starts from the title set by renaming, if any, rather than
                 // the terminal's.
-                TabTitleField(
-                    title: (tab.window?.windowController as? BaseTerminalController)?.titleOverride ?? title,
-                    end: endRenaming)
+                TabTitleField(title: tab.titleOverride ?? title, end: endRenaming)
             } else {
                 Text(title)
                     .lineLimit(1)
@@ -453,7 +430,7 @@ private struct TabButton: View {
 
     private var closeButton: some View {
         Button {
-            (tab.window?.windowController as? TerminalController)?.closeTab(nil)
+            close()
         } label: {
             Image(systemName: "xmark")
         }
@@ -478,7 +455,7 @@ private struct TabButton: View {
     /// hovered, and selected (unchanged by hover) where Liquid Glass isn't
     /// available.
     private var backgroundOpacity: Double {
-        if tab.isSelected { return 0.24 }
+        if isSelected { return 0.24 }
         return hovering ? 0.13 : 0
     }
 
@@ -487,7 +464,7 @@ private struct TabButton: View {
     @ViewBuilder
     private var background: some View {
 #if compiler(>=6.2)
-        if #available(macOS 26.0, *), tab.isSelected {
+        if #available(macOS 26.0, *), isSelected {
             Color.clear
                 .glassEffect(.regular.interactive(), in: Capsule())
                 .opacity(0.8)
@@ -500,12 +477,7 @@ private struct TabButton: View {
     }
 
     private var showsShortcut: Bool {
-        commandKey.showsShortcuts && tab.shortcut != nil
-    }
-
-    private var titlePublisher: AnyPublisher<String, Never> {
-        guard let window = tab.window else { return Empty().eraseToAnyPublisher() }
-        return window.publisher(for: \.title).eraseToAnyPublisher()
+        commandKey.showsShortcuts && shortcut != nil
     }
 }
 

@@ -149,10 +149,11 @@ struct TerminalCommandPaletteView: View {
             let color = (window as? TerminalWindow)?.tabColor
             let displayColor = color != TerminalTabColor.none ? color : nil
 
-            return controller.surfaceTree.map { surface in
+            // Every tab's terminals; presenting one selects its tab.
+            return controller.workspaceModel.allTabs.flatMap { tab in tab.surfaceTree.map { (tab, $0) } }.map { tab, surface in
                 let terminalTitle = surface.title.isEmpty ? window.title : surface.title
                 let displayTitle: String
-                if let override = controller.titleOverride, !override.isEmpty {
+                if let override = tab.titleOverride, !override.isEmpty {
                     displayTitle = override
                 } else if !terminalTitle.isEmpty {
                     displayTitle = terminalTitle

@@ -1,18 +1,17 @@
 import SwiftUI
 
-/// The workspace sidebar shown in every tab window. All of a group's tab
-/// windows render the same shared `WorkspaceWindowGroup`. The sidebar is
-/// empty until the tab has been assigned to a group.
+/// The workspace sidebar of a terminal window.
 struct WorkspaceSidebarView: View {
-    @ObservedObject var membership: WorkspaceMembership
+    @ObservedObject var model: WorkspaceModel
+
+    /// Performs the sidebar's actions. Weak, since the controller owns the
+    /// window this is in.
+    let controller: Weak<TerminalController>
+
     @ObservedObject var insets: WorkspaceSidebarInsets
 
     var body: some View {
-        if let group = membership.group {
-            WorkspaceListView(group: group, topInset: insets.top)
-        } else {
-            Color.clear
-        }
+        WorkspaceListView(model: model, controller: controller, topInset: insets.top)
     }
 }
 
@@ -24,19 +23,17 @@ final class WorkspaceSidebarInsets: ObservableObject {
 }
 
 /// The workspace list, laid out by hand rather than with `List` so rows can
-/// be dragged to reorder them, sliding aside like the tab strip's tabs.
-///
-/// The selection is drawn by the rows from `group.selectedID`: every tab
-/// window has its own copy of this list, and a list's own selection state
-/// would go stale as the selection changes in code or in hidden tab windows.
+/// be dragged to reorder them, sliding aside like the tab strip's tabs. The
+/// rows draw the selection from the model.
 private struct WorkspaceListView: View {
-    @ObservedObject var group: WorkspaceWindowGroup
+    @ObservedObject var model: WorkspaceModel
+    let controller: Weak<TerminalController>
     let topInset: CGFloat
 
     /// The workspace a tab dragged out of the tab strip would be dropped on.
     @State private var dropTarget: UUID?
 
-    private var drag: WorkspaceWindowGroup.WorkspaceDrag? { group.workspaceDrag }
+    private var drag: WorkspaceModel.WorkspaceDrag? { model.workspaceDrag }
 
     private static let rowHeight: CGFloat = 32
     private static let slide = Animation.easeOut(duration: 0.15)
@@ -53,12 +50,12 @@ private struct WorkspaceListView: View {
                     .padding(.top, 6)
                     .padding(.bottom, 2)
 
-                ForEach(Array(group.workspaces.enumerated()), id: \.element.id) { index, workspace in
+                ForEach(Array(model.workspaces.enumerated()), id: \.element.id) { index, workspace in
                     WorkspaceRow(
                         name: workspace.name,
-                        isSelected: workspace.id == group.selectedID,
+                        isSelected: workspace.id == model.selectedWorkspaceID,
                         isDropTarget: workspace.id == dropTarget,
-                        select: { group.select(workspace.id) })
+                        select: { controller.value?.selectWorkspace(workspace.id) })
                         .frame(height: Self.rowHeight)
                         .offset(y: offset(at: index))
                         // The dragged row tracks the pointer; the others slide.
@@ -67,7 +64,11 @@ private struct WorkspaceListView: View {
                         .gesture(DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(workspace.id) })
                         .onDrop(
                             of: [.ghosttyWorkspaceTab],
-                            delegate: TabDropDelegate(workspace: workspace.id, group: group, target: $dropTarget))
+                            delegate: TabDropDelegate(
+                                workspace: workspace.id,
+                                model: model,
+                                controller: controller,
+                                target: $dropTarget))
                 }
             }
             .padding(.horizontal, 10)
@@ -83,55 +84,51 @@ private struct WorkspaceListView: View {
     // with the pointer while the rows it passes slide into its place, and
     // the workspaces reorder on release.
     //
-    // Selecting shows another tab window, so the rest of the drag is
-    // followed by `PressDragTracker` and drawn from the group's shared
-    // `workspaceDrag`. The row is found by ID each time, since workspaces
-    // can come and go during the drag (e.g. when a last terminal exits).
+    // The rest of the drag is followed by `PressDragTracker` and drawn from
+    // the model's `workspaceDrag`. The row is found by ID each time, since
+    // workspaces can come and go during the drag (e.g. when a last terminal
+    // exits).
 
     private func beginDrag(_ id: UUID) {
         // The gesture also reports every move; only the press begins a drag.
         guard let press = NSApp.currentEvent, press.type == .leftMouseDown else { return }
 
-        group.select(id)
-        group.workspaceDrag = .init(id: id)
+        controller.value?.selectWorkspace(id)
+        model.workspaceDrag = .init(id: id)
 
-        let group = group
-        PressDragTracker.begin(from: press) { [weak group] _, translation in
-            guard let group else { return false }
-            guard let from = Self.index(of: id, in: group) else {
+        let model = model
+        PressDragTracker.begin(from: press) { [weak model] _, translation in
+            guard let model else { return false }
+            guard let from = model.workspaceIndex(of: id) else {
                 // The workspace is gone.
-                group.workspaceDrag = nil
+                model.workspaceDrag = nil
                 return false
             }
-            group.workspaceDrag = .init(id: id, offset: Self.slots(of: group).clamped(translation.height, from: from))
+            model.workspaceDrag = .init(id: id, offset: Self.slots(of: model).clamped(translation.height, from: from))
             return true
-        } released: { [weak group] translation in
-            guard let group else { return }
+        } released: { [weak model] translation in
+            guard let model else { return }
             withAnimation(Self.slide) {
-                if let from = Self.index(of: id, in: group) {
-                    let slots = Self.slots(of: group)
+                if let from = model.workspaceIndex(of: id) {
+                    let slots = Self.slots(of: model)
                     let offset = slots.clamped(translation.height, from: from)
-                    group.moveWorkspace(id, to: slots.destination(from: from, offset: offset))
+                    model.moveWorkspace(id, to: slots.destination(from: from, offset: offset))
                 }
-                group.workspaceDrag = nil
+                model.workspaceDrag = nil
             }
-        } cancelled: { [weak group] in
-            withAnimation(Self.slide) { group?.workspaceDrag = nil }
+        } cancelled: { [weak model] in
+            withAnimation(Self.slide) { model?.workspaceDrag = nil }
         }
     }
 
-    private static func index(of id: UUID, in group: WorkspaceWindowGroup) -> Int? {
-        group.workspaces.firstIndex { $0.id == id }
-    }
-
-    private static func slots(of group: WorkspaceWindowGroup) -> ReorderSlots {
-        ReorderSlots(count: group.workspaces.count, stride: rowHeight)
+    private static func slots(of model: WorkspaceModel) -> ReorderSlots {
+        ReorderSlots(count: model.workspaces.count, stride: rowHeight)
     }
 
     /// How far the row is drawn from its slot during a drag.
     private func offset(at index: Int) -> CGFloat {
-        guard let drag, let from = Self.index(of: drag.id, in: group) else { return 0 }
-        return Self.slots(of: group).offset(of: index, draggingFrom: from, by: drag.offset)
+        guard let drag, let from = model.workspaceIndex(of: drag.id) else { return 0 }
+        return Self.slots(of: model).offset(of: index, draggingFrom: from, by: drag.offset)
     }
 }
 
@@ -139,7 +136,8 @@ private struct WorkspaceListView: View {
 /// workspace. Dropped on its own workspace, it goes back where it was.
 private struct TabDropDelegate: DropDelegate {
     let workspace: UUID
-    let group: WorkspaceWindowGroup
+    let model: WorkspaceModel
+    let controller: Weak<TerminalController>
     @Binding var target: UUID?
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -160,15 +158,15 @@ private struct TabDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         target = nil
-        guard let window = draggedTab else { return false }
-        group.moveTab(window, toWorkspace: workspace)
+        guard let tab = draggedTab else { return false }
+        controller.value?.moveTab(tab, toWorkspace: workspace)
         return true
     }
 
-    /// The tab being dragged out of this group's tab strip.
-    private var draggedTab: NSWindow? {
-        guard let drag = group.tabDrag, drag.phase == .draggingOut else { return nil }
-        return group.tabs.first { $0.id == drag.id }?.window
+    /// The tab being dragged out of this window's tab strip.
+    private var draggedTab: TerminalTab? {
+        guard let drag = model.tabDrag, drag.phase == .draggingOut else { return nil }
+        return model.tab(id: drag.id)
     }
 }
 

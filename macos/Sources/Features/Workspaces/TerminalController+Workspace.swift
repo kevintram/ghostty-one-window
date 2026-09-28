@@ -1,138 +1,357 @@
 import AppKit
+import GhosttyKit
+
+// A window holds the tabs of all of its workspaces in its `workspaceModel`.
+// Only the selected tab's split tree is in the window: it's the controller's
+// `surfaceTree`, which the base class and the terminal view work on. The
+// other tabs' terminals keep running outside the window, occluded and
+// unfocused. Selecting a tab swaps its tree into `surfaceTree`.
 
 extension TerminalController {
-    var workspaceGroup: WorkspaceWindowGroup? { workspaceMembership.group }
-    var workspaceID: UUID? { workspaceMembership.workspaceID }
-
-    /// Whether this tab uses workspaces, i.e. its window got the workspace
-    /// layout when it loaded (see `canHostWorkspaces`). Fixed for the
-    /// window's lifetime, unlike its style, which e.g. non-native fullscreen
-    /// changes.
-    var supportsWorkspaces: Bool {
+    /// Whether this window has tabs, i.e. it got the workspace layout when
+    /// it loaded (see `canHostWorkspaces`). Windows without it open new tabs
+    /// as new windows.
+    var supportsTabs: Bool {
         window?.contentViewController is WorkspaceSplitViewController
     }
 
-    /// Whether this tab may join `other`'s native tab group. Workspace tabs
-    /// only share a group with workspace tabs, since tabs without the
-    /// workspace layout would be stranded in it (e.g. an undone tab whose
-    /// window follows a config changed since it closed).
-    func canShareTabGroup(with other: NSWindow) -> Bool {
-        supportsWorkspaces == ((other.windowController as? TerminalController)?.supportsWorkspaces ?? false)
-    }
-
-    /// Whether a just-loaded window can host workspaces. Workspaces are tabs
-    /// of one native tab group with their controls in the titlebar, so
-    /// windows that never tab (hidden titlebar) or have no titlebar
-    /// (`window-decoration = false`) can't. Decided by window class rather
-    /// than `tabbingMode`, which is briefly `.automatic` for hidden titlebar
-    /// windows after they load.
+    /// Whether a just-loaded window can host workspaces. The sidebar sits
+    /// under the titlebar beside the window buttons, so windows without a
+    /// titlebar (hidden titlebar, `window-decoration = false`) can't.
     var canHostWorkspaces: Bool {
         guard let window = window as? TerminalWindow,
               !(window is HiddenTitlebarTerminalWindow) else { return false }
         return window.styleMask.contains(.titled)
     }
 
-    /// The tabs of this tab's workspace in native tab order. The native tab
-    /// group holds the tabs of every workspace, so tab navigation and
-    /// "close other tabs" style operations must use this instead of the
-    /// tab group's windows. Without a workspace this is the whole group.
-    var workspaceTabs: [NSWindow] {
-        guard let window else { return [] }
-        guard let workspaceGroup, let workspaceID else {
-            return window.tabGroup?.windows ?? [window]
+    /// The tab shown in the window.
+    var selectedTab: TerminalTab? {
+        workspaceModel.selectedTab
+    }
+
+    // MARK: Selecting
+
+    /// Shows the given tab in the window, selecting its workspace too.
+    func selectTab(_ tab: TerminalTab) {
+        guard tab !== selectedTab, workspaceModel.contains(tab) else { return }
+
+        let previous = selectedTab
+        workspaceModel.renamingTabID = nil
+        workspaceModel.select(tab)
+        if let previous { hideSurfaces(of: previous) }
+
+        titleOverride = tab.titleOverride
+        surfaceTree = tab.surfaceTree
+
+        // Focus what was focused in the tab. The terminal view only reports
+        // focus once the surface is in the window and first responder, so
+        // update the title and appearance for it now.
+        let focus = tab.focusedSurface.flatMap { tab.surfaceTree.contains($0) ? $0 : nil }
+            ?? tab.surfaceTree.root?.leftmostLeaf()
+        focusedSurfaceDidChange(to: focus)
+        pwdDidChange(to: focus?.pwd.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) })
+        if let focus {
+            DispatchQueue.main.async {
+                Ghostty.moveFocus(to: focus)
+            }
+        }
+    }
+
+    /// Selects the workspace's last selected tab.
+    func selectWorkspace(_ id: UUID) {
+        guard let tab = workspaceModel.workspaces.first(where: { $0.id == id })?.selectedTab else { return }
+        selectTab(tab)
+    }
+
+    /// Selects the workspace `offset` positions away, wrapping around.
+    private func selectAdjacentWorkspace(offset: Int) {
+        let workspaces = workspaceModel.workspaces
+        guard workspaces.count > 1,
+              let id = workspaceModel.selectedWorkspaceID,
+              let index = workspaceModel.workspaceIndex(of: id) else { return }
+        let count = workspaces.count
+        selectWorkspace(workspaces[((index + offset) % count + count) % count].id)
+    }
+
+    /// Unfocuses and occludes a tab's terminals as it leaves the window, so
+    /// they stop rendering until it's shown again.
+    func hideSurfaces(of tab: TerminalTab) {
+        for view in tab.surfaceTree {
+            view.focusDidChange(false)
+            if let surface = view.surface {
+                ghostty_surface_set_occlusion(surface, false)
+                view.isWindowVisible = false
+            }
+        }
+    }
+
+    // MARK: Adding
+
+    /// Adds a tab with a new terminal to a workspace, the selected one by
+    /// default, and selects it. It goes after the selected tab or at the
+    /// end, following `window-new-tab-position`.
+    @discardableResult
+    func addTab(
+        withBaseConfig config: Ghostty.SurfaceConfiguration? = nil,
+        inWorkspace id: UUID? = nil
+    ) -> TerminalTab? {
+        guard let app = ghostty.app,
+              let id = id ?? workspaceModel.selectedWorkspaceID else { return nil }
+
+        let tab = TerminalTab(surfaceTree: .init(view: Ghostty.SurfaceView(app, baseConfig: config)))
+        var index: Int?
+        if ghostty.config.windowNewTabPosition != "end",
+           id == workspaceModel.selectedWorkspaceID,
+           let current = workspaceModel.tabs.firstIndex(where: { $0 === selectedTab }) {
+            index = current + 1
         }
 
-        return workspaceGroup.windows(in: workspaceID)
+        workspaceModel.insert(tab, inWorkspace: id, at: index)
+        selectTab(tab)
+        return tab
     }
 
-    /// Reconciles workspace membership with this tab's native tab group on
-    /// the next event loop tick. Deferred because callers such as undo show
-    /// a window before inserting it into its tab group.
-    func scheduleWorkspaceReconcile() {
-        DispatchQueue.main.async { [weak self] in
-            self?.reconcileWorkspaces()
+    // MARK: Closing
+
+    /// Closes a tab, asking for confirmation if any of its terminals has a
+    /// running process. The window's last tab closes the window.
+    func close(tab: TerminalTab) {
+        guard workspaceModel.contains(tab) else { return }
+
+        guard workspaceModel.allTabs.count > 1 else {
+            closeWindow(nil)
+            return
+        }
+
+        guard tab.surfaceTree.contains(where: { $0.needsConfirmQuit }) else {
+            closeTabImmediately(tab)
+            return
+        }
+
+        // Show the tab being asked about.
+        selectTab(tab)
+        confirmClose(
+            messageText: "Close Tab?",
+            informativeText: "The terminal still has a running process. If you close the tab the process will be killed."
+        ) {
+            self.closeTabImmediately(tab)
         }
     }
 
-    /// Makes every tab in this tab's native tab group belong to one
-    /// workspace group. See `WorkspaceWindowGroup.reconcile`.
-    func reconcileWorkspaces() {
-        // Skip windows that closed since this was scheduled; reconciling
-        // would give a closed tab its membership back.
-        guard let window, window.isVisible || window.tabGroup?.windows.count ?? 0 > 1 else { return }
-
-        let tabGroup = window.tabGroup
-        let allTabs = (tabGroup?.windows ?? [window])
-            .compactMap { $0.windowController as? TerminalController }
-        let tabs = allTabs.filter(\.supportsWorkspaces)
-        guard !tabs.isEmpty else { return }
-
-        // A window that can't hold workspaces (hidden titlebar) has no
-        // sidebar or tab strip, so it must not share a tab group with
-        // workspace tabs. AppKit can still put it there, e.g. with Merge All
-        // Windows; give it back its own window.
-        for tab in allTabs where !tab.supportsWorkspaces {
-            if let tabWindow = tab.window { tabGroup?.removeWindow(tabWindow) }
+    /// Closes a tab, the selected one by default, without confirmation (see
+    /// `detach` for what's selected instead). The window's last tab closes
+    /// the window. Undoing it puts the tab back.
+    func closeTabImmediately(_ tab: TerminalTab? = nil, registerRedo: Bool = true) {
+        guard let tab = tab ?? selectedTab,
+              let location = workspaceModel.location(of: tab) else { return }
+        guard workspaceModel.allTabs.count > 1 else {
+            closeWindowImmediately()
+            return
         }
 
-        let selected = tabGroup?.selectedWindow?.windowController as? TerminalController
-        WorkspaceWindowGroup.reconcile(
-            tabs,
-            selected: selected?.supportsWorkspaces == true ? selected : tabs.first)
+        let workspace = workspaceModel.workspaces[location.workspace]
+        let wasSelected = tab === selectedTab
+
+        // The undo keeps the tab, and so its terminals, alive until it expires.
+        if let undoManager {
+            let order = workspaceModel.workspaces.map(\.id)
+            undoManager.setActionName("Close Tab")
+            undoManager.registerUndo(
+                withTarget: self,
+                expiresAfter: undoExpiration
+            ) { target in
+                target.reinsert(
+                    tab,
+                    at: location.tab,
+                    inWorkspace: workspace.id,
+                    named: workspace.name,
+                    workspaceOrder: order,
+                    select: wasSelected)
+
+                if registerRedo {
+                    undoManager.registerUndo(
+                        withTarget: target,
+                        expiresAfter: target.undoExpiration
+                    ) { target in
+                        target.closeTabImmediately(tab)
+                    }
+                }
+            }
+        }
+
+        detach(tab)
+
+        // Like closing a window, this ends requests its terminals can no
+        // longer present.
+        for surface in tab.surfaceTree {
+            cancelPendingClipboardConfirmation(for: surface)
+        }
     }
 
-    // MARK: Undo
-
-    /// Where a closed tab belonged, so undoing the close puts it back. Holds
-    /// the group strongly so it survives until the undo expires even if all
-    /// of its tabs closed.
-    struct WorkspaceUndoState {
-        let group: WorkspaceWindowGroup
-        let id: UUID
-        let name: String
-
-        /// The group's workspace order when the tab closed, used to put a
-        /// recreated workspace back in its place.
-        let order: [UUID]
+    /// Takes a tab out of the window. If it's the shown tab, the tab to its
+    /// right in its workspace is selected, else the one to its left; if it
+    /// was the workspace's last tab, the workspace goes and the next
+    /// workspace (else the previous one) is selected.
+    private func detach(_ tab: TerminalTab) {
+        if tab === selectedTab, let next = tabToSelect(afterDetaching: tab) {
+            selectTab(next)
+        }
+        workspaceModel.remove(tab)
     }
 
-    var workspaceUndoState: WorkspaceUndoState? {
-        guard let workspaceGroup, let workspaceID,
-              let workspace = workspaceGroup.workspaces.first(where: { $0.id == workspaceID }) else { return nil }
-        return .init(
-            group: workspaceGroup,
-            id: workspaceID,
-            name: workspace.name,
-            order: workspaceGroup.workspaces.map(\.id))
+    private func tabToSelect(afterDetaching tab: TerminalTab) -> TerminalTab? {
+        guard let location = workspaceModel.location(of: tab) else { return nil }
+        let workspaces = workspaceModel.workspaces
+        let tabs = workspaces[location.workspace].tabs
+        if location.tab + 1 < tabs.count { return tabs[location.tab + 1] }
+        if location.tab > 0 { return tabs[location.tab - 1] }
+
+        let neighbor = location.workspace + 1 < workspaces.count ? location.workspace + 1 : location.workspace - 1
+        return workspaces.indices.contains(neighbor) ? workspaces[neighbor].selectedTab : nil
     }
 
-    /// Ends renaming the tab in its tab strip, setting its title to
-    /// `title`, or leaving it if nil (cancelled). An empty title restores
-    /// the terminal's own. Keyboard focus goes back to the terminal, also
-    /// when the rename ended because the window stopped being key, so it's
-    /// there when it's key again.
-    func endRenamingTab(title: String?) {
-        workspaceMembership.isRenamingTab = false
-        if let title { titleOverride = title.isEmpty ? nil : title }
+    /// Puts a closed tab back, recreating its workspace if that was its
+    /// last tab, in its place in `workspaceOrder`.
+    private func reinsert(
+        _ tab: TerminalTab,
+        at index: Int,
+        inWorkspace id: UUID,
+        named name: String,
+        workspaceOrder: [UUID],
+        select: Bool
+    ) {
+        guard !workspaceModel.contains(tab) else { return }
+
+        if workspaceModel.workspaceIndex(of: id) == nil {
+            // After the nearest workspace that preceded it and still exists.
+            let preceding = workspaceOrder.prefix { $0 != id }.reversed()
+            let position = preceding.lazy
+                .compactMap { self.workspaceModel.workspaceIndex(of: $0) }
+                .first.map { $0 + 1 } ?? 0
+            workspaceModel.addWorkspace(id: id, name: name, at: position)
+        }
+
+        workspaceModel.insert(tab, inWorkspace: id, at: index)
+        if select { selectTab(tab) }
+    }
+
+    /// Closes a terminal of a tab that isn't shown, e.g. when its process
+    /// exits. If it needs confirmation, its tab is shown first. Like closing
+    /// a shown terminal, it can be undone.
+    func closeSurfaceInHiddenTab(_ surface: Ghostty.SurfaceView, withConfirmation: Bool) {
+        guard let tab = workspaceModel.tab(owning: surface),
+              tab !== selectedTab,
+              let node = tab.surfaceTree.root?.node(view: surface) else { return }
+
+        if withConfirmation {
+            selectTab(tab)
+            closeSurface(surface, withConfirmation: true)
+            return
+        }
+
+        let tree = tab.surfaceTree.removing(node)
+        guard !tree.isEmpty else {
+            closeTabImmediately(tab)
+            return
+        }
+
+        // The undo keeps the surface alive, but its requests end now, as
+        // when closing a shown terminal.
+        cancelPendingClipboardConfirmation(for: surface)
+
+        let oldTree = tab.surfaceTree
+        workspaceModel.setSurfaceTree(tree, of: tab)
+        if tab.focusedSurface.map({ !tree.contains($0) }) ?? true {
+            tab.focusedSurface = tree.root?.leftmostLeaf()
+        }
+        registerSurfaceTreeUndo(from: oldTree, to: tree, undoAction: "Close Terminal")
+    }
+
+    // MARK: Moving
+
+    /// Moves a tab to the end of another workspace and follows it there,
+    /// selecting the tab and its new workspace. The workspace it left shows
+    /// its neighbor when switched back to, or is removed if it was its only
+    /// tab.
+    func moveTab(_ tab: TerminalTab, toWorkspace id: UUID) {
+        guard let source = workspaceModel.workspace(of: tab),
+              source.id != id,
+              workspaceModel.workspaceIndex(of: id) != nil else { return }
+        selectTab(tab)
+        workspaceModel.transfer(tab, toWorkspace: id)
+    }
+
+    /// Moves a tab into a new window of its own, in a workspace named after
+    /// the one it left. It stays the same tab, with its terminals, focus and
+    /// title. Returns false if it's the window's only tab.
+    ///
+    /// This window's undo history is cleared: its entries for the tab (its
+    /// creation, its split changes) would act on this window rather than
+    /// the tab's new one. Entries expire after a few seconds anyway.
+    @discardableResult
+    func moveTabToNewWindow(_ tab: TerminalTab) -> Bool {
+        guard workspaceModel.allTabs.count > 1,
+              let workspace = workspaceModel.workspace(of: tab) else { return false }
+
+        detach(tab)
+
+        // Like the native action this replaces, this can't be undone: undoing
+        // the new window would close the tab rather than move it back.
+        undoManager?.disableUndoRegistration()
+        defer { undoManager?.enableUndoRegistration() }
+        let newController = TerminalController.newWindow(
+            ghostty,
+            tree: tab.surfaceTree,
+            inheritBackgroundOpacity: isBackgroundOpaque)
+        let newWorkspace = Workspace(id: UUID(), name: workspace.name, tabs: [tab], selectedTabID: tab.id)
+        newController.adoptWorkspaces([newWorkspace], selectedWorkspaceID: newWorkspace.id)
+        undoManager?.removeAllActions(withTarget: self)
+        return true
+    }
+
+    /// Takes over workspaces from elsewhere (a closed window being restored
+    /// by undo, a tab moved from another window), with the selected tab's
+    /// title and focus. The controller must have been created with the
+    /// selected tab's split tree, which replaces the tab it was created with.
+    func adoptWorkspaces(_ workspaces: [Workspace], selectedWorkspaceID: UUID?) {
+        workspaceModel.replaceWorkspaces(workspaces, selectedWorkspaceID: selectedWorkspaceID)
+        titleOverride = selectedTab?.titleOverride
+
+        guard let focus = selectedTab?.focusedSurface ?? surfaceTree.first else { return }
+        focusedSurface = focus
+        DispatchQueue.main.async {
+            Ghostty.moveFocus(to: focus)
+        }
+    }
+
+    // MARK: Renaming
+
+    /// Sets a tab's title override. The shown tab's goes through the
+    /// controller, which also titles the window.
+    func setTitleOverride(_ title: String?, of tab: TerminalTab) {
+        if tab === selectedTab {
+            titleOverride = title
+        } else {
+            tab.titleOverride = title
+        }
+    }
+
+    /// Ends renaming a tab in the tab strip, setting its title to `title`,
+    /// or leaving it if nil (cancelled). An empty title restores the
+    /// terminal's own. Keyboard focus goes back to the terminal.
+    func endRenamingTab(_ tab: TerminalTab, title: String?) {
+        if workspaceModel.renamingTabID == tab.id { workspaceModel.renamingTabID = nil }
+        if let title { setTitleOverride(title.isEmpty ? nil : title, of: tab) }
         if let focusedSurface { window?.makeFirstResponder(focusedSurface) }
-    }
-
-    /// Returns a restored tab to the workspace it was closed from,
-    /// recreating the workspace if that was its last tab. Does nothing if
-    /// the restored window can't be a tab under the current config.
-    func restoreWorkspace(_ state: WorkspaceUndoState?) {
-        guard supportsWorkspaces, let state else { return }
-        state.group.restoreWorkspace(id: state.id, name: state.name, order: state.order)
-        workspaceMembership.assign(to: state.group, workspace: state.id)
     }
 
     // MARK: First Responder
 
     @IBAction func newWorkspace(_ sender: Any?) {
-        // ⌘N used to be New Window. In a window that can't have workspaces
+        // ⌘N used to be New Window. In a window that can't have tabs
         // (hidden titlebar), it still is. Our `newWindow` needs a focused
         // surface to inherit from; without one, open a plain window.
-        guard supportsWorkspaces, let window else {
+        guard supportsTabs, ghostty.app != nil else {
             if focusedSurface?.surface != nil {
                 newWindow(sender)
             } else {
@@ -141,67 +360,34 @@ extension TerminalController {
             return
         }
 
-        // A window joins its workspace group a tick after it's shown, so a
-        // quick second ⌘N can arrive before that. Join it now.
-        if workspaceGroup == nil { reconcileWorkspaces() }
-        guard let group = workspaceGroup else {
-            NSSound.beep()
-            return
-        }
-
         var config = Ghostty.SurfaceConfiguration()
         config.workingDirectory = focusedSurface?.pwd
-
-        let controller = TerminalController(ghostty, withBaseConfig: config)
-        guard let newWindow = controller.window else { return }
-
-        // The new window's style follows the current config, which may have
-        // changed to one without tabs (hidden titlebar) since this window
-        // opened. Like Ghostty's new tab, open it as its own window then.
-        guard controller.supportsWorkspaces else {
-            controller.showWindowSafely(self)
-            return
-        }
-
-        // The new workspace's first tab joins our tab group at the end.
-        let last = window.tabGroup?.windows.last ?? window
-        guard last.addTabbedWindowSafely(newWindow, ordered: .above) else {
-            // The tab was never shown and its terminal is already running.
-            // Emptying the tree is how Ghostty closes a terminal window.
-            controller.surfaceTree = .init()
-            NSSound.beep()
-            return
-        }
-
-        let id = group.addWorkspace()
-        controller.workspaceMembership.assign(to: group, workspace: id)
-        group.select(id)
+        addTab(withBaseConfig: config, inWorkspace: workspaceModel.addWorkspace())
     }
 
     /// Selects workspace `sender.tag` (1-based), or the last one for 9.
     @IBAction func selectWorkspaceByNumber(_ sender: NSMenuItem) {
-        guard let workspaceGroup,
-              let workspace = workspaceNumbered(sender.tag, in: workspaceGroup) else { return }
-        workspaceGroup.select(workspace.id)
+        guard let workspace = workspaceNumbered(sender.tag) else { return }
+        selectWorkspace(workspace.id)
     }
 
     /// Whether the workspace for a numbered menu item exists. When it
     /// doesn't, the item is disabled so its key goes to the terminal.
     func canSelectWorkspace(numbered number: Int) -> Bool {
-        guard let workspaceGroup else { return false }
-        return workspaceNumbered(number, in: workspaceGroup) != nil
+        workspaceNumbered(number) != nil
     }
 
-    private func workspaceNumbered(_ number: Int, in group: WorkspaceWindowGroup) -> WorkspaceWindowGroup.Workspace? {
-        if number == 9 { return group.workspaces.last }
-        return group.workspaces.indices.contains(number - 1) ? group.workspaces[number - 1] : nil
+    private func workspaceNumbered(_ number: Int) -> Workspace? {
+        let workspaces = workspaceModel.workspaces
+        if number == 9 { return workspaces.last }
+        return workspaces.indices.contains(number - 1) ? workspaces[number - 1] : nil
     }
 
     @IBAction func selectNextWorkspace(_ sender: Any?) {
-        workspaceGroup?.selectAdjacent(offset: 1)
+        selectAdjacentWorkspace(offset: 1)
     }
 
     @IBAction func selectPreviousWorkspace(_ sender: Any?) {
-        workspaceGroup?.selectAdjacent(offset: -1)
+        selectAdjacentWorkspace(offset: -1)
     }
 }
