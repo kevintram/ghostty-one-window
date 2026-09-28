@@ -70,7 +70,7 @@ private struct TabStrip: View {
                 Image(systemName: "plus")
                     .frame(width: Self.newTabWidth, height: 24)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(HoverCircleButtonStyle())
             .help("New Tab")
         }
         // Match the vertical inset: 24pt tabs centered in the strip's height.
@@ -433,9 +433,14 @@ private struct TabButton: View {
             close()
         } label: {
             Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .semibold))
+                .frame(width: Self.closeCircleSize, height: Self.closeCircleSize)
         }
-        .buttonStyle(TabCloseButtonStyle())
+        .buttonStyle(HoverCircleButtonStyle())
         .help("Close Tab")
+        // Laid out as just the glyph, so the × sits flush with the tab's edge
+        // and its circle extends past it.
+        .padding(-Self.closeCircleOverhang)
     }
 
     /// Below these widths, a tab drops to the next layout.
@@ -447,6 +452,10 @@ private struct TabButton: View {
     static let selectedMinWidth: CGFloat = 32
 
     private static let closeWidth: CGFloat = 24
+
+    /// The close button's hover circle, and how far it extends past the ×.
+    private static let closeCircleSize: CGFloat = 16
+    private static let closeCircleOverhang: CGFloat = 4
     private static let spacing: CGFloat = 4
     /// Keeps the icon and close button clear of the capsule's rounded ends.
     private static let inset: CGFloat = 8
@@ -481,39 +490,32 @@ private struct TabButton: View {
     }
 }
 
-/// A tab's close button. While hovered, the × brightens and a circle marking
-/// its hit area appears behind it, darkening while pressed.
-private struct TabCloseButtonStyle: ButtonStyle {
+/// The tab strip's glyph buttons (new tab, close tab). Muted at rest, the
+/// glyph brightens while hovered and a circle filling the label's frame
+/// appears behind it, marking its hit area, and darkens while pressed.
+private struct HoverCircleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        CloseButton(configuration: configuration)
+        HoverCircleButton(configuration: configuration)
     }
 
-    private struct CloseButton: View {
+    private struct HoverCircleButton: View {
         let configuration: Configuration
 
         @State private var hovering = false
 
         var body: some View {
             configuration.label
-                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(hovering ? .primary : .secondary)
-                .frame(width: Self.size, height: Self.size)
                 .background(Circle().fill(Color.primary.opacity(circleOpacity)))
                 .contentShape(Circle())
                 .onHover { hovering = $0 }
                 .animation(.easeOut(duration: 0.1), value: circleOpacity)
-                // Laid out as just the glyph, so the × sits flush with the
-                // tab's edge and the circle extends past it.
-                .padding(-Self.overhang)
         }
 
         private var circleOpacity: Double {
             if configuration.isPressed { return 0.2 }
             return hovering ? 0.12 : 0
         }
-
-        private static let size: CGFloat = 16
-        private static let overhang: CGFloat = 4
     }
 }
 
