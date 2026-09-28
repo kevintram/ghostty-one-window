@@ -111,9 +111,6 @@ final class WorkspaceModel: ObservableObject {
 
     @Published var renaming: Renaming?
 
-    /// The `goto_tab` shortcut of each tab position, e.g. "⌘1".
-    @Published var tabShortcuts: [String?] = []
-
     /// A tab being dragged in the tab strip, and how far it's been dragged.
     struct TabDrag: Equatable {
         enum Phase {

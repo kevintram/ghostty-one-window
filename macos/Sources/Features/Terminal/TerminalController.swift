@@ -81,7 +81,6 @@ class TerminalController: BaseTerminalController {
         let tab = TerminalTab(surfaceTree: surfaceTree)
         workspaceModel.insert(tab, inWorkspace: workspaceModel.addWorkspace())
         workspaceModel.select(tab)
-        updateTabShortcuts()
 
         // Setup our notifications for behaviors
         let center = NotificationCenter.default
@@ -530,15 +529,6 @@ class TerminalController: BaseTerminalController {
         /// Surface-level config will be updated in
         /// ``Ghostty/Ghostty/SurfaceView/derivedConfig`` then
         /// ``TerminalController/focusedSurfaceDidChange(to:)``
-    }
-
-    /// Updates the `goto_tab` shortcuts the tab strip shows for the first
-    /// nine tabs. Called when the config changes.
-    func updateTabShortcuts() {
-        let shortcuts: [String?] = (1...9).map { tab in
-            ghostty.config.keyboardShortcut(for: "goto_tab:\(tab)").map { "\($0)" }
-        }
-        if workspaceModel.tabShortcuts != shortcuts { workspaceModel.tabShortcuts = shortcuts }
     }
 
     // Tab titles are edited in place in the tab strip. Ghostty's own inline

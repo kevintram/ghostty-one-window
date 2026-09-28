@@ -167,12 +167,10 @@ selects that tab's workspace.
 ### 6.3 Tab strip and tab selection
 
 The tab strip sits above the terminal, below the titlebar, and shows only the
-selected workspace's tabs, in order. Each tab is a capsule
-showing a terminal icon, its title, and a close button on hover. While
-Command is held, the icon gives way to the tab's `goto_tab` shortcut (⌘1–⌘9,
-numbered within the workspace). Resting tabs are transparent, hovered ones
-tinted, and the selected one Liquid Glass. The strip ends with a New Tab
-button.
+selected workspace's tabs, in order. Each tab is a capsule showing a terminal
+icon, its title, and a close button on hover. Resting tabs are transparent,
+hovered ones tinted, and the selected one Liquid Glass. The strip ends with a
+New Tab button.
 
 However many tabs there are, they share the strip's width and keep
 shrinking, as in Chrome: titles shorten, then the close button's space goes
@@ -514,8 +512,8 @@ Implemented:
   switching swaps split trees.
 - Sidebar with workspace list and selection; a Liquid Glass titlebar control
   with New Workspace and the sidebar toggle.
-- Tab strip with titles, per-workspace ⌘1–⌘9 labels, selection, close on
-  hover, and New Tab; hidden for a single tab.
+- Tab strip with titles, selection, close on hover, and New Tab; hidden for a
+  single tab.
 - Workspace drag-to-reorder in the sidebar.
 - Tab drag-to-reorder in the strip, and moving tabs between workspaces by
   dragging them out of the strip onto the sidebar.

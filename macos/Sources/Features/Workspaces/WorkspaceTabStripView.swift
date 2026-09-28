@@ -1,4 +1,3 @@
-import Combine
 import SwiftUI
 
 /// The tab strip above the terminal, showing the selected workspace's tabs.
@@ -33,20 +32,15 @@ private struct TabStrip: View {
 
     var body: some View {
         // A tab dragged out of the strip leaves it until the drag ends.
-        let allTabs = model.tabs
         let selected = model.selectedTab
-        let tabs = allTabs.filter { phase(of: $0) != .draggingOut }
+        let tabs = model.tabs.filter { phase(of: $0) != .draggingOut }
         let widths = tabWidths(count: tabs.count, includingSelected: tabs.contains { $0 === selected })
-
-        // Shortcuts number the tabs in the workspace, including a dragged out one.
-        let shortcuts = Dictionary(uniqueKeysWithValues: zip(allTabs.map(\.id), model.tabShortcuts))
 
         HStack(spacing: Self.spacing) {
             ForEach(tabs) { tab in
                 TabButton(
                     tab: tab,
                     isSelected: tab === selected,
-                    shortcut: shortcuts[tab.id] ?? nil,
                     width: tab === selected ? widths.selected : widths.other,
                     isRenaming: isRenaming(tab)
                 ) { title in
@@ -286,7 +280,6 @@ extension TabStrip: DropDelegate {
 private struct TabButton: View {
     @ObservedObject var tab: TerminalTab
     let isSelected: Bool
-    let shortcut: String?
     let width: CGFloat
     let isRenaming: Bool
     let endRenaming: (_ title: String?) -> Void
@@ -294,7 +287,6 @@ private struct TabButton: View {
     let close: () -> Void
 
     @State private var hovering = false
-    @ObservedObject private var commandKey = CommandKeyState.shared
 
     private var title: String { tab.title }
 
@@ -306,7 +298,6 @@ private struct TabButton: View {
             .clipped()
             .background { background }
             .animation(.easeOut(duration: 0.12), value: backgroundOpacity)
-            .animation(.easeOut(duration: 0.12), value: showsShortcut)
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
             // The full title, which narrow tabs cut short or leave out.
@@ -389,22 +380,10 @@ private struct TabButton: View {
         }
     }
 
-    /// A terminal icon, which the tab's ⌘-number replaces while ⌘ is held,
-    /// pushing the title aside by however wider it is.
     private var icon: some View {
-        Group {
-            if showsShortcut, let shortcut {
-                Text(shortcut)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                    .fixedSize(horizontal: layout != .tiny, vertical: false)
-            } else {
-                Image(systemName: "terminal.fill")
-                    .accessibilityHidden(true)
-            }
-        }
-        .foregroundStyle(.secondary)
-        .transition(.opacity)
+        Image(systemName: "terminal.fill")
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
     }
 
     /// The icon's size when it's all a tab shows: shrinking with the tab, down
@@ -484,10 +463,6 @@ private struct TabButton: View {
         Capsule().fill(Color.primary.opacity(backgroundOpacity))
 #endif
     }
-
-    private var showsShortcut: Bool {
-        commandKey.showsShortcuts && shortcut != nil
-    }
 }
 
 /// The tab strip's glyph buttons (new tab, close tab). Muted at rest, the
@@ -516,55 +491,5 @@ private struct HoverCircleButtonStyle: ButtonStyle {
             if configuration.isPressed { return 0.2 }
             return hovering ? 0.12 : 0
         }
-    }
-}
-
-/// Whether tabs show their ⌘-number shortcuts: once ⌘ has been held for a
-/// moment, so they don't flash while pressing a shortcut, and until it's
-/// released. One app-wide modifier monitor shared by every tab.
-@MainActor
-private final class CommandKeyState: ObservableObject {
-    static let shared = CommandKeyState()
-
-    @Published private(set) var showsShortcuts = false
-
-    private static let delay: Duration = .milliseconds(500)
-    private var pendingShow: Task<Void, Never>?
-
-    private init() {
-        _ = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.update(event.modifierFlags)
-            return event
-        }
-
-        // Releasing ⌘ in another app never reaches us.
-        _ = NotificationCenter.default.addObserver(
-            forName: NSApplication.didResignActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hide() }
-        }
-    }
-
-    private func update(_ flags: NSEvent.ModifierFlags) {
-        guard flags.contains(.command) else {
-            hide()
-            return
-        }
-
-        guard !showsShortcuts, pendingShow == nil else { return }
-        pendingShow = Task { [weak self] in
-            try? await Task.sleep(for: Self.delay)
-            guard let self, !Task.isCancelled else { return }
-            pendingShow = nil
-            showsShortcuts = true
-        }
-    }
-
-    private func hide() {
-        pendingShow?.cancel()
-        pendingShow = nil
-        if showsShortcuts { showsShortcuts = false }
     }
 }
