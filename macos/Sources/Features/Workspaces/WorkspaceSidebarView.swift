@@ -51,17 +51,28 @@ private struct WorkspaceListView: View {
                     .padding(.bottom, 2)
 
                 ForEach(Array(model.workspaces.enumerated()), id: \.element.id) { index, workspace in
+                    let isRenaming = model.renaming == .workspace(workspace.id)
                     WorkspaceRow(
                         name: workspace.name,
                         isSelected: workspace.id == model.selectedWorkspaceID,
                         isDropTarget: workspace.id == dropTarget,
-                        select: { controller.value?.selectWorkspace(workspace.id) })
+                        isRenaming: isRenaming,
+                        select: { controller.value?.selectWorkspace(workspace.id) },
+                        endRenaming: { controller.value?.endRenamingWorkspace(workspace.id, name: $0) })
                         .frame(height: Self.rowHeight)
                         .offset(y: offset(at: index))
                         // The dragged row tracks the pointer; the others slide.
                         .animation(drag?.id == workspace.id ? nil : Self.slide, value: offset(at: index))
                         .zIndex(drag?.id == workspace.id ? 1 : 0)
-                        .gesture(DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(workspace.id) })
+                        // Clicks in the name field while renaming position the cursor.
+                        .gesture(
+                            DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(workspace.id) },
+                            including: isRenaming ? .subviews : .all)
+                        .contextMenu {
+                            Button("Rename Workspace…") {
+                                controller.value?.beginRenamingWorkspace(workspace.id)
+                            }
+                        }
                         .onDrop(
                             of: [.ghosttyWorkspaceTab],
                             delegate: TabDropDelegate(
@@ -82,7 +93,7 @@ private struct WorkspaceListView: View {
     // Pressing a row selects its workspace right away, like a tab, so a
     // click is just a drag that doesn't go anywhere. Dragging moves the row
     // with the pointer while the rows it passes slide into its place, and
-    // the workspaces reorder on release.
+    // the workspaces reorder on release. Double-clicking renames it.
     //
     // The rest of the drag is followed by `PressDragTracker` and drawn from
     // the model's `workspaceDrag`. The row is found by ID each time, since
@@ -94,6 +105,11 @@ private struct WorkspaceListView: View {
         guard let press = NSApp.currentEvent, press.type == .leftMouseDown else { return }
 
         controller.value?.selectWorkspace(id)
+        if press.clickCount == 2 {
+            controller.value?.beginRenamingWorkspace(id)
+            return
+        }
+
         model.workspaceDrag = .init(id: id)
 
         let model = model
@@ -176,14 +192,24 @@ private struct WorkspaceRow: View {
     let name: String
     let isSelected: Bool
     let isDropTarget: Bool
+    let isRenaming: Bool
     let select: () -> Void
+    let endRenaming: (_ name: String?) -> Void
 
     var body: some View {
         HStack(spacing: 6.5) {
             Image(systemName: "rectangle.stack")
                 .imageScale(.large)
                 .foregroundStyle(isDropTarget ? Color.white : Color.accentColor)
-            Text(name).fontWeight(isSelected ? .bold : .regular)
+            if isRenaming {
+                InlineTitleField("Workspace Name", title: name, end: endRenaming)
+                    .fontWeight(.bold)
+            } else {
+                Text(name)
+                    .fontWeight(isSelected ? .bold : .regular)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
         // A drop target is filled with the accent color, like Finder's.
         .foregroundStyle(isDropTarget ? Color.white : Color.primary)
@@ -197,8 +223,10 @@ private struct WorkspaceRow: View {
             }
         }
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        // One button for VoiceOver, except while renaming, when the name
+        // field must stay reachable.
+        .accessibilityElement(children: isRenaming ? .contain : .combine)
+        .accessibilityAddTraits(isRenaming ? [] : isSelected ? [.isButton, .isSelected] : .isButton)
         // Pointer selection happens in the list's drag gesture, on press.
         .accessibilityAction { select() }
     }

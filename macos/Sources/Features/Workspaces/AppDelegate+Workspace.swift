@@ -29,6 +29,14 @@ extension AppDelegate {
             withTitle: "New Workspace",
             action: #selector(TerminalController.newWorkspace(_:)),
             keyEquivalent: "n")
+
+        // ⌘⇧R, next to ⌘R for renaming a tab. ⌃R would take the shell's
+        // reverse history search.
+        let rename = menu.addItem(
+            withTitle: "Rename Workspace…",
+            action: #selector(TerminalController.renameWorkspace(_:)),
+            keyEquivalent: "r")
+        rename.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(.separator())
 
         let next = menu.addItem(

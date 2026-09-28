@@ -219,6 +219,7 @@ The default commands are:
 | New Window | `Command-Shift-N` | Create a new application window with one workspace and one tab. |
 | New Tab | `Command-T` | Create a tab in the current workspace. |
 | New Workspace | `Command-N` | Create and select a workspace containing one new tab. |
+| Rename Workspace | `Command-Shift-R` | Rename the selected workspace in place in the sidebar. |
 | Close Tab | `Command-W` | Close the active tab using Ghostty's existing confirmation behavior. The next tab is chosen within the same workspace. |
 | Close Window | `Command-Shift-W` | Close the application window, including every workspace in it. |
 | Hide/Show Sidebar | `Command-B` | Show or hide the workspace sidebar (View menu, titlebar button). |
@@ -260,6 +261,18 @@ Renaming a workspace does not change terminal titles, working directories, or
 commands.
 
 Workspace names do not need to be unique within an application window.
+
+### Renaming a workspace
+
+A workspace is renamed in place in the sidebar, by double-clicking its row,
+choosing Rename Workspace… from the row's context menu, or with Rename
+Workspace (`Command-Shift-R`) for the selected workspace, which shows the
+sidebar if it's collapsed. Its name becomes a text field: Return saves it,
+and so does clicking elsewhere or switching apps; Escape cancels. Keyboard
+focus then returns to the terminal. An empty name uses the title of the
+workspace's current tab. Long names are truncated in the sidebar.
+
+`Control-R` is left alone since shells use it for reverse history search.
 
 ### Closing a workspace
 
@@ -496,7 +509,8 @@ Implemented:
 - Workspace drag-to-reorder in the sidebar.
 - Tab drag-to-reorder in the strip, and moving tabs between workspaces by
   dragging them out of the strip onto the sidebar.
-- Renaming tabs in place in the strip (`Command-R`).
+- Renaming tabs in place in the strip (`Command-R`), and workspaces in place
+  in the sidebar (double-click, context menu, `Command-Shift-R`).
 - New Workspace (`Command-N`), Next/Previous Workspace
   (`Command-Option-]`/`[`), Go to Workspace (`Control-1`–`9`), New Window
   moved to `Command-Shift-N`.
@@ -518,7 +532,7 @@ Implemented:
 
 Not yet implemented:
 
-- Workspace rename and close (with all-or-cancel confirmation).
+- Workspace close (with all-or-cancel confirmation).
 - Dragging tabs out of the application window, or between windows; moving a
   tab into an existing window; a Move to Workspace context menu action.
 - Tab context menu, per-tab colors (the tab color is per window), and bell

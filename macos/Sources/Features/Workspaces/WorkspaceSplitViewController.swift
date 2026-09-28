@@ -88,10 +88,11 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         // while a tab is being renamed in it.
         let tabStripHeight = tabStrip.heightAnchor.constraint(equalToConstant: 0)
         tabStripVisibility = model.$workspaces
-            .combineLatest(model.$selectedWorkspaceID, model.$renamingTabID)
-            .map { workspaces, selectedID, renamingID in
+            .combineLatest(model.$selectedWorkspaceID, model.$renaming)
+            .map { workspaces, selectedID, renaming in
                 let tabs = workspaces.first { $0.id == selectedID }?.tabs.count ?? 0
-                return tabs > 1 || renamingID != nil
+                guard case .tab = renaming else { return tabs > 1 }
+                return true
             }
             .removeDuplicates()
             .sink { [weak tabStrip] visible in

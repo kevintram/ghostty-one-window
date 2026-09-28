@@ -36,7 +36,7 @@ extension TerminalController {
         guard tab !== selectedTab, workspaceModel.contains(tab) else { return }
 
         let previous = selectedTab
-        workspaceModel.renamingTabID = nil
+        workspaceModel.renaming = nil
         workspaceModel.select(tab)
         if let previous { hideSurfaces(of: previous) }
 
@@ -340,12 +340,49 @@ extension TerminalController {
     /// or leaving it if nil (cancelled). An empty title restores the
     /// terminal's own. Keyboard focus goes back to the terminal.
     func endRenamingTab(_ tab: TerminalTab, title: String?) {
-        if workspaceModel.renamingTabID == tab.id { workspaceModel.renamingTabID = nil }
+        endRenaming(.tab(tab.id))
         if let title { setTitleOverride(title.isEmpty ? nil : title, of: tab) }
+    }
+
+    /// Starts renaming a workspace in the sidebar, showing the sidebar if
+    /// it's collapsed.
+    func beginRenamingWorkspace(_ id: UUID) {
+        guard workspaceModel.workspaceIndex(of: id) != nil else { return }
+        workspaceModel.isSidebarCollapsed = false
+        workspaceModel.renaming = .workspace(id)
+    }
+
+    /// Ends renaming a workspace, naming it `name`, or leaving it if nil
+    /// (cancelled). An empty name uses the title of the workspace's current
+    /// tab. Keyboard focus goes back to the terminal.
+    func endRenamingWorkspace(_ id: UUID, name: String?) {
+        endRenaming(.workspace(id))
+        if let name, let workspace = workspaceModel.workspaces.first(where: { $0.id == id }) {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            workspaceModel.renameWorkspace(id, to: trimmed.isEmpty ? workspace.selectedTab?.title ?? workspace.name : trimmed)
+        }
+    }
+
+    /// Stops renaming `renaming` and gives keyboard focus back to the
+    /// terminal, also when the rename was already stopped (e.g. by switching
+    /// apps) so the terminal has it when the window is key again. If another
+    /// rename took over, the focus is that rename's.
+    private func endRenaming(_ renaming: WorkspaceModel.Renaming) {
+        switch workspaceModel.renaming {
+        case renaming: workspaceModel.renaming = nil
+        case nil: break
+        default: return
+        }
         if let focusedSurface { window?.makeFirstResponder(focusedSurface) }
     }
 
     // MARK: First Responder
+
+    /// Renames the selected workspace.
+    @IBAction func renameWorkspace(_ sender: Any?) {
+        guard let id = workspaceModel.selectedWorkspaceID else { return }
+        beginRenamingWorkspace(id)
+    }
 
     @IBAction func newWorkspace(_ sender: Any?) {
         // ⌘N used to be New Window. In a window that can't have tabs

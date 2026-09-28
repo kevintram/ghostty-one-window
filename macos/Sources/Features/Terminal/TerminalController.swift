@@ -546,7 +546,7 @@ class TerminalController: BaseTerminalController {
 
     override func promptTabTitle() {
         guard supportsTabs, let tab = selectedTab else { return super.promptTabTitle() }
-        workspaceModel.renamingTabID = tab.id
+        workspaceModel.renaming = .tab(tab.id)
     }
 
     override func changeTabTitle(_ sender: Any) {
@@ -965,7 +965,7 @@ class TerminalController: BaseTerminalController {
 
         // Switching apps ends a rename, which saves the title, rather than
         // leaving the edit open indefinitely.
-        workspaceModel.renamingTabID = nil
+        workspaceModel.renaming = nil
     }
 
     override func windowDidMove(_ notification: Notification) {
@@ -1324,6 +1324,9 @@ extension TerminalController {
 
         case #selector(selectNextWorkspace), #selector(selectPreviousWorkspace):
             return workspaceModel.workspaces.count > 1
+
+        case #selector(renameWorkspace):
+            return supportsTabs
 
         case #selector(selectWorkspaceByNumber):
             return canSelectWorkspace(numbered: item.tag)

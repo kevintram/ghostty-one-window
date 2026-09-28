@@ -91,9 +91,15 @@ final class WorkspaceModel: ObservableObject {
 
     @Published var isSidebarCollapsed = false
 
-    /// The tab whose title is being edited in the tab strip, which shows
-    /// while it is, even for a single tab.
-    @Published var renamingTabID: UUID?
+    /// What's being renamed in place, one thing at a time: a tab in the tab
+    /// strip (which shows while it is, even for a single tab), or a
+    /// workspace in the sidebar.
+    enum Renaming: Equatable {
+        case tab(UUID)
+        case workspace(UUID)
+    }
+
+    @Published var renaming: Renaming?
 
     /// The `goto_tab` shortcut of each tab position, e.g. "⌘1".
     @Published var tabShortcuts: [String?] = []
@@ -217,7 +223,7 @@ final class WorkspaceModel: ObservableObject {
         if workspaces[location.workspace].tabs.isEmpty {
             workspaces.remove(at: location.workspace)
         }
-        if renamingTabID == tab.id { renamingTabID = nil }
+        if renaming == .tab(tab.id) { renaming = nil }
     }
 
     /// Makes the tab the selected one, and its workspace the selected
@@ -270,6 +276,11 @@ final class WorkspaceModel: ObservableObject {
         workspaces[target].tabs.append(tab)
         workspaces[target].selectedTabID = tab.id
         if selectedWorkspaceID == source.id { selectedWorkspaceID = id }
+    }
+
+    func renameWorkspace(_ id: UUID, to name: String) {
+        guard let index = workspaceIndex(of: id) else { return }
+        workspaces[index].name = name
     }
 
     func moveWorkspace(_ id: UUID, to index: Int) {

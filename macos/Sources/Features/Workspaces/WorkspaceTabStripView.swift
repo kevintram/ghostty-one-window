@@ -225,7 +225,7 @@ private struct TabStrip: View {
 
     /// Whether the tab's title is being edited in the strip.
     private func isRenaming(_ tab: TerminalTab) -> Bool {
-        model.renamingTabID == tab.id
+        model.renaming == .tab(tab.id)
     }
 
     /// The drag phase of the tab, if it's the one being dragged.
@@ -418,7 +418,7 @@ private struct TabButton: View {
             if isRenaming {
                 // Starts from the title set by renaming, if any, rather than
                 // the terminal's.
-                TabTitleField(title: tab.titleOverride ?? title, end: endRenaming)
+                InlineTitleField("Tab Title", title: tab.titleOverride ?? title, end: endRenaming)
             } else {
                 Text(title)
                     .lineLimit(1)
@@ -516,43 +516,6 @@ private struct HoverCircleButtonStyle: ButtonStyle {
             if configuration.isPressed { return 0.2 }
             return hovering ? 0.12 : 0
         }
-    }
-}
-
-/// A tab's title being edited in place. Return saves it, and so does
-/// leaving it: clicking elsewhere, or the window losing key status when
-/// switching tabs or apps, which ends the rename and removes the field.
-/// Escape cancels.
-private struct TabTitleField: View {
-    let end: (_ title: String?) -> Void
-
-    @State private var text: String
-    @State private var ended = false
-    @FocusState private var isFocused: Bool
-
-    init(title: String, end: @escaping (_ title: String?) -> Void) {
-        self.end = end
-        _text = State(initialValue: title)
-    }
-
-    var body: some View {
-        TextField("Tab Title", text: $text)
-            .textFieldStyle(.plain)
-            .focused($isFocused)
-            .onAppear { isFocused = true }
-            .onSubmit { finish(text) }
-            .onExitCommand { finish(nil) }
-            .onChange(of: isFocused) { focused in
-                if !focused { finish(text) }
-            }
-            .onDisappear { finish(text) }
-    }
-
-    /// Ends the rename once, however it ends.
-    private func finish(_ title: String?) {
-        guard !ended else { return }
-        ended = true
-        end(title)
     }
 }
 
