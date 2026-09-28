@@ -242,7 +242,8 @@ struct ConfigTests {
     func emptyConfigShouldBeHaveDefaultShortcut() throws {
         let config = try TemporaryConfig("")
         let newWindow = try #require(config.keyboardShortcut(for: "new_window"))
-        #expect(newWindow == .init("n", modifiers: [.command]))
+        // ⌘N is New Workspace; New Window moved to ⌘⇧N.
+        #expect(newWindow == .init("n", modifiers: [.command, .shift]))
         let gotoToNextSplit = try #require(config.keyboardShortcut(for: "goto_split:next"))
         #expect(gotoToNextSplit == .init("]", modifiers: [.command]))
     }
