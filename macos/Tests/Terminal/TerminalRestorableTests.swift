@@ -123,7 +123,7 @@ struct TerminalRestorableTests {
             tabColor: nil,
             titleOverride: nil,
             workspaces: [
-                .init(name: "One", tabs: [
+                .init(customName: "One", tabs: [
                     .init(surfaceTree: other.0, focusedSurface: other.2.id.uuidString, titleOverride: "renamed"),
                     .init(surfaceTree: nil, focusedSurface: nil, titleOverride: nil),
                 ], selectedTab: 1),
@@ -133,7 +133,7 @@ struct TerminalRestorableTests {
         let v8 = try unarchive(data, className: "CodableBridge<Terminal>", as: CodableBridge<DummyTerminalRestorableState>.self)
             .value.internalState
         let workspace = try #require(v8.workspaces?.first)
-        #expect(workspace.name == "One")
+        #expect(workspace.customName == "One")
         #expect(workspace.selectedTab == 1)
         #expect(workspace.tabs.count == 2)
         #expect(workspace.tabs[0].titleOverride == "renamed")

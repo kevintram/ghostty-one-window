@@ -245,7 +245,7 @@ rather than introducing an unrelated shortcut system.
 
 Creating a workspace:
 
-1. Creates a workspace with a stable UUID and default name.
+1. Creates a workspace with a stable UUID and no custom name.
 2. Captures the focused pane's current working directory from the active tab.
 3. Creates one tab with the captured working directory as its initial
    working directory.
@@ -255,8 +255,8 @@ Creating a workspace:
 If the focused pane does not report a working directory, creation falls back
 to Ghostty's normal new-terminal working-directory behavior.
 
-Default workspace naming is initially `Workspace 1`, `Workspace 2`, and so on
-within an application window. Numbers are not reused within a window.
+Until it's renamed, a workspace is named after its current tab (the one
+selecting the workspace shows), following that tab's title as it changes.
 Renaming a workspace does not change terminal titles, working directories, or
 commands.
 
@@ -269,8 +269,9 @@ choosing Rename Workspace… from the row's context menu, or with Rename
 Workspace (`Command-Shift-R`) for the selected workspace, which shows the
 sidebar if it's collapsed. Its name becomes a text field: Return saves it,
 and so does clicking elsewhere or switching apps; Escape cancels. Keyboard
-focus then returns to the terminal. An empty name uses the title of the
-workspace's current tab. Long names are truncated in the sidebar.
+focus then returns to the terminal. An empty name removes the custom name, so
+the workspace is named after its current tab again. Long names are truncated
+in the sidebar.
 
 `Control-R` is left alone since shells use it for reverse history search.
 

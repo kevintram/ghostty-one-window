@@ -65,10 +65,14 @@ final class TerminalTab: ObservableObject, Identifiable {
     }
 }
 
-/// A named, ordered group of tabs in a window.
+/// An ordered group of tabs in a window.
 struct Workspace: Identifiable {
     let id: UUID
-    var name: String
+
+    /// The name set by renaming the workspace. Without one, the workspace is
+    /// named after its current tab's title.
+    var customName: String?
+
     var tabs: [TerminalTab]
 
     /// The tab shown when the workspace is selected.
@@ -134,9 +138,6 @@ final class WorkspaceModel: ObservableObject {
 
     @Published var workspaceDrag: WorkspaceDrag?
 
-    /// Used for default names. Never reused within a window.
-    private var nextNumber = 1
-
     /// The fixed width of the workspace sidebar.
     static let sidebarWidth: CGFloat = 200
 
@@ -198,12 +199,11 @@ final class WorkspaceModel: ObservableObject {
 
     // MARK: Changes
 
-    /// Appends a new workspace with a default name, or inserts it at
-    /// `index`, and returns its ID. It has no tabs until one is inserted.
+    /// Appends a new workspace, or inserts it at `index`, and returns its
+    /// ID. It has no tabs until one is inserted.
     @discardableResult
-    func addWorkspace(id: UUID = UUID(), name: String? = nil, at index: Int? = nil) -> UUID {
-        let workspace = Workspace(id: id, name: name ?? "Workspace \(nextNumber)", tabs: [])
-        if name == nil { nextNumber += 1 }
+    func addWorkspace(id: UUID = UUID(), customName: String? = nil, at index: Int? = nil) -> UUID {
+        let workspace = Workspace(id: id, customName: customName, tabs: [])
         workspaces.insert(workspace, at: min(index ?? workspaces.endIndex, workspaces.endIndex))
         return id
     }
@@ -278,9 +278,11 @@ final class WorkspaceModel: ObservableObject {
         if selectedWorkspaceID == source.id { selectedWorkspaceID = id }
     }
 
-    func renameWorkspace(_ id: UUID, to name: String) {
+    /// Sets a workspace's custom name, or with nil, names it after its
+    /// current tab again.
+    func renameWorkspace(_ id: UUID, to name: String?) {
         guard let index = workspaceIndex(of: id) else { return }
-        workspaces[index].name = name
+        workspaces[index].customName = name
     }
 
     func moveWorkspace(_ id: UUID, to index: Int) {
@@ -292,9 +294,5 @@ final class WorkspaceModel: ObservableObject {
     func replaceWorkspaces(_ workspaces: [Workspace], selectedWorkspaceID: UUID?) {
         self.workspaces = workspaces
         self.selectedWorkspaceID = selectedWorkspaceID ?? workspaces.first?.id
-
-        // Continue default names after the restored ones.
-        let numbers = workspaces.compactMap { Int($0.name.trimmingPrefix("Workspace ")) }
-        nextNumber = max(nextNumber, (numbers.max() ?? 0) + 1)
     }
 }

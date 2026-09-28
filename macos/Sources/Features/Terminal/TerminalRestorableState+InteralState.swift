@@ -24,7 +24,7 @@ extension TerminalRestorableState {
         var workspaces: [WorkspaceState]?
 
         struct WorkspaceState: Codable {
-            let name: String
+            let customName: String?
             let tabs: [TabState]
             let selectedTab: Int
         }
@@ -50,7 +50,7 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
             titleOverride: controller.titleOverride,
             workspaces: model.workspaces.map { workspace in
                 WorkspaceState(
-                    name: workspace.name,
+                    customName: workspace.customName,
                     tabs: workspace.tabs.map { tab in
                         TabState(
                             surfaceTree: tab === selected ? nil : tab.surfaceTree,
@@ -75,7 +75,7 @@ extension TerminalController {
         var workspaces: [Workspace] = []
         var selectedWorkspaceID: UUID?
         for savedWorkspace in saved {
-            var workspace = Workspace(id: UUID(), name: savedWorkspace.name, tabs: [])
+            var workspace = Workspace(id: UUID(), customName: savedWorkspace.customName, tabs: [])
             for savedTab in savedWorkspace.tabs {
                 guard let tree = savedTab.surfaceTree else {
                     workspace.tabs.append(current)

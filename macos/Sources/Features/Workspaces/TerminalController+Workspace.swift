@@ -164,7 +164,7 @@ extension TerminalController {
                     tab,
                     at: location.tab,
                     inWorkspace: workspace.id,
-                    named: workspace.name,
+                    customName: workspace.customName,
                     workspaceOrder: order,
                     select: wasSelected)
 
@@ -216,7 +216,7 @@ extension TerminalController {
         _ tab: TerminalTab,
         at index: Int,
         inWorkspace id: UUID,
-        named name: String,
+        customName: String?,
         workspaceOrder: [UUID],
         select: Bool
     ) {
@@ -228,7 +228,7 @@ extension TerminalController {
             let position = preceding.lazy
                 .compactMap { self.workspaceModel.workspaceIndex(of: $0) }
                 .first.map { $0 + 1 } ?? 0
-            workspaceModel.addWorkspace(id: id, name: name, at: position)
+            workspaceModel.addWorkspace(id: id, customName: customName, at: position)
         }
 
         workspaceModel.insert(tab, inWorkspace: id, at: index)
@@ -303,7 +303,7 @@ extension TerminalController {
             ghostty,
             tree: tab.surfaceTree,
             inheritBackgroundOpacity: isBackgroundOpaque)
-        let newWorkspace = Workspace(id: UUID(), name: workspace.name, tabs: [tab], selectedTabID: tab.id)
+        let newWorkspace = Workspace(id: UUID(), customName: workspace.customName, tabs: [tab], selectedTabID: tab.id)
         newController.adoptWorkspaces([newWorkspace], selectedWorkspaceID: newWorkspace.id)
         undoManager?.removeAllActions(withTarget: self)
         return true
@@ -353,13 +353,13 @@ extension TerminalController {
     }
 
     /// Ends renaming a workspace, naming it `name`, or leaving it if nil
-    /// (cancelled). An empty name uses the title of the workspace's current
-    /// tab. Keyboard focus goes back to the terminal.
+    /// (cancelled). An empty name names it after its current tab again.
+    /// Keyboard focus goes back to the terminal.
     func endRenamingWorkspace(_ id: UUID, name: String?) {
         endRenaming(.workspace(id))
-        if let name, let workspace = workspaceModel.workspaces.first(where: { $0.id == id }) {
+        if let name {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            workspaceModel.renameWorkspace(id, to: trimmed.isEmpty ? workspace.selectedTab?.title ?? workspace.name : trimmed)
+            workspaceModel.renameWorkspace(id, to: trimmed.isEmpty ? nil : trimmed)
         }
     }
 

@@ -52,34 +52,39 @@ private struct WorkspaceListView: View {
 
                 ForEach(Array(model.workspaces.enumerated()), id: \.element.id) { index, workspace in
                     let isRenaming = model.renaming == .workspace(workspace.id)
-                    WorkspaceRow(
-                        name: workspace.name,
-                        isSelected: workspace.id == model.selectedWorkspaceID,
-                        isDropTarget: workspace.id == dropTarget,
-                        isRenaming: isRenaming,
-                        select: { controller.value?.selectWorkspace(workspace.id) },
-                        endRenaming: { controller.value?.endRenamingWorkspace(workspace.id, name: $0) })
-                        .frame(height: Self.rowHeight)
-                        .offset(y: offset(at: index))
-                        // The dragged row tracks the pointer; the others slide.
-                        .animation(drag?.id == workspace.id ? nil : Self.slide, value: offset(at: index))
-                        .zIndex(drag?.id == workspace.id ? 1 : 0)
-                        // Clicks in the name field while renaming position the cursor.
-                        .gesture(
-                            DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(workspace.id) },
-                            including: isRenaming ? .subviews : .all)
-                        .contextMenu {
-                            Button("Rename Workspace…") {
-                                controller.value?.beginRenamingWorkspace(workspace.id)
+                    // Every workspace in the list has a tab, which names it
+                    // unless it has a custom name.
+                    if let tab = workspace.selectedTab {
+                        WorkspaceRow(
+                            customName: workspace.customName,
+                            tab: tab,
+                            isSelected: workspace.id == model.selectedWorkspaceID,
+                            isDropTarget: workspace.id == dropTarget,
+                            isRenaming: isRenaming,
+                            select: { controller.value?.selectWorkspace(workspace.id) },
+                            endRenaming: { controller.value?.endRenamingWorkspace(workspace.id, name: $0) })
+                            .frame(height: Self.rowHeight)
+                            .offset(y: offset(at: index))
+                            // The dragged row tracks the pointer; the others slide.
+                            .animation(drag?.id == workspace.id ? nil : Self.slide, value: offset(at: index))
+                            .zIndex(drag?.id == workspace.id ? 1 : 0)
+                            // Clicks in the name field while renaming position the cursor.
+                            .gesture(
+                                DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(workspace.id) },
+                                including: isRenaming ? .subviews : .all)
+                            .contextMenu {
+                                Button("Rename Workspace…") {
+                                    controller.value?.beginRenamingWorkspace(workspace.id)
+                                }
                             }
-                        }
-                        .onDrop(
-                            of: [.ghosttyWorkspaceTab],
-                            delegate: TabDropDelegate(
-                                workspace: workspace.id,
-                                model: model,
-                                controller: controller,
-                                target: $dropTarget))
+                            .onDrop(
+                                of: [.ghosttyWorkspaceTab],
+                                delegate: TabDropDelegate(
+                                    workspace: workspace.id,
+                                    model: model,
+                                    controller: controller,
+                                    target: $dropTarget))
+                    }
                 }
             }
             .padding(.horizontal, 10)
@@ -189,12 +194,18 @@ private struct TabDropDelegate: DropDelegate {
 /// A workspace row, styled like a sidebar list's own selection: highlighted
 /// edge to edge within the sidebar's 10pt inset, with the name in bold.
 private struct WorkspaceRow: View {
-    let name: String
+    let customName: String?
+
+    /// The workspace's current tab, which names it without a custom name.
+    @ObservedObject var tab: TerminalTab
+
     let isSelected: Bool
     let isDropTarget: Bool
     let isRenaming: Bool
     let select: () -> Void
     let endRenaming: (_ name: String?) -> Void
+
+    private var name: String { customName ?? tab.title }
 
     var body: some View {
         HStack(spacing: 6.5) {
