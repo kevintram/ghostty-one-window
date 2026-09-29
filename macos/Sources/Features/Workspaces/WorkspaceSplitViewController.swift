@@ -136,6 +136,16 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         }
     }
 
+    /// The window content size that gives the terminal `size`, with the
+    /// sidebar, titlebar and tab strip around it as they're laid out now.
+    func contentSize(forTerminalSize size: CGSize) -> CGSize {
+        view.layoutSubtreeIfNeeded()
+        let terminal = terminalContainer.frame.size
+        return CGSize(
+            width: size.width + view.bounds.width - terminal.width,
+            height: size.height + view.bounds.height - terminal.height)
+    }
+
     override func viewWillAppear() {
         super.viewWillAppear()
         installSidebarControls()

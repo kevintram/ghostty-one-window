@@ -404,7 +404,8 @@ class TerminalController: BaseTerminalController {
             if let window = c.window {
                 // If we have a tree size, resize the window's content to match
                 if let treeSize, treeSize.width > 0, treeSize.height > 0 {
-                    window.setContentSize(treeSize)
+                    let workspaces = window.contentViewController as? WorkspaceSplitViewController
+                    window.setContentSize(workspaces?.contentSize(forTerminalSize: treeSize) ?? treeSize)
                     window.constrainToScreen()
                 }
 
