@@ -89,8 +89,10 @@ private struct TabStrip: View {
         // Match the vertical inset: 24pt tabs centered in the strip's height.
         .padding(.horizontal, Self.inset)
         // Measure the strip's width, not its content's: the tabs are sized
-        // from it, so letting them feed back into it would never settle.
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // from it, so letting them feed back into it would keep the tabs
+        // from ever shrinking. Without the zero minimum, the frame takes its
+        // content's width whenever that's wider.
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .frame(height: WorkspaceModel.tabStripHeight)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .task(id: hold) {
