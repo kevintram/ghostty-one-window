@@ -447,6 +447,62 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Move the current tab to a new window."),
         }},
 
+        .new_workspace => comptime &.{.{
+            .action = .new_workspace,
+            .title = i18n.N_("New Workspace"),
+            .description = i18n.N_("Open a new workspace."),
+        }},
+
+        .close_workspace => comptime &.{.{
+            .action = .close_workspace,
+            .title = i18n.N_("Close Workspace"),
+            .description = i18n.N_("Close the current workspace and all of its tabs."),
+        }},
+
+        .rename_workspace => comptime &.{.{
+            .action = .rename_workspace,
+            .title = i18n.N_("Rename Workspace"),
+            .description = i18n.N_("Rename the current workspace."),
+        }},
+
+        .move_workspace => comptime &.{
+            .{
+                .action = .{ .move_workspace = -1 },
+                .title = i18n.N_("Move Workspace Up"),
+                .description = i18n.N_("Move the current workspace up in the sidebar."),
+            },
+            .{
+                .action = .{ .move_workspace = 1 },
+                .title = i18n.N_("Move Workspace Down"),
+                .description = i18n.N_("Move the current workspace down in the sidebar."),
+            },
+        },
+
+        .move_tab_to_workspace => comptime &.{
+            .{
+                .action = .{ .move_tab_to_workspace = -1 },
+                .title = i18n.N_("Move Tab to Previous Workspace"),
+                .description = i18n.N_("Move the current tab to the previous workspace."),
+            },
+            .{
+                .action = .{ .move_tab_to_workspace = 1 },
+                .title = i18n.N_("Move Tab to Next Workspace"),
+                .description = i18n.N_("Move the current tab to the next workspace."),
+            },
+        },
+
+        .toggle_sidebar => comptime &.{.{
+            .action = .toggle_sidebar,
+            .title = i18n.N_("Toggle Sidebar"),
+            .description = i18n.N_("Show or hide the workspace sidebar."),
+        }},
+
+        .reopen_closed => comptime &.{.{
+            .action = .reopen_closed,
+            .title = i18n.N_("Reopen Closed"),
+            .description = i18n.N_("Reopen the most recently closed split, tab, workspace or window."),
+        }},
+
         .toggle_tab_overview => comptime &.{.{
             .action = .toggle_tab_overview,
             .title = i18n.N_("Toggle Tab Overview"),
@@ -728,6 +784,7 @@ fn actionCommands(action: Action.Key) []const Command {
         .jump_to_prompt,
         .write_scrollback_file,
         .goto_tab,
+        .goto_workspace,
         .resize_split,
         .activate_key_table,
         .activate_key_table_once,
@@ -745,6 +802,9 @@ fn actionCommands(action: Action.Key) []const Command {
         .previous_tab,
         .next_tab,
         .last_tab,
+        .previous_workspace,
+        .next_workspace,
+        .last_workspace,
         => comptime &.{},
 
         // No commands for obvious reasons

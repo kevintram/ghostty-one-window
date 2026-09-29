@@ -231,33 +231,53 @@ Creating a new application window creates one workspace with one tab.
 
 ## 7. Commands and expected behavior
 
-The default commands are:
+The default commands are below. Each is a Ghostty keybinding action, so
+`keybind` can change it, and the menus show the bound shortcut. The keys
+follow two layers: the workspace shortcuts are the tab shortcuts with
+Control in place of Command.
 
-| Command | Default shortcut | Behavior |
-| --- | --- | --- |
-| New Window | `Command-Shift-N` | Create a new application window with one workspace and one tab. |
-| New Tab | `Command-T` | Create a tab in the current workspace. |
-| New Workspace | `Command-N` | Create and select a workspace containing one new tab. |
-| Rename Workspace | `Command-Shift-R` | Rename the selected workspace in place in the sidebar. |
-| Close Workspace | None | Close the selected workspace and all of its tabs (8). |
-| Close Tab | `Command-W` | Close the active tab using Ghostty's existing confirmation behavior. The next tab is chosen within the same workspace. |
-| Close Window | `Command-Shift-W` | Close the application window, including every workspace in it. |
-| Hide/Show Sidebar | `Command-B` | Show or hide the workspace sidebar (View menu, titlebar button). |
-| Next Tab | `Command-Shift-]` | Select the next tab within the current workspace. |
-| Previous Tab | `Command-Shift-[` | Select the previous tab within the current workspace. |
-| Go to Tab 1–9 | `Command-1` … `Command-9` | Select the Nth tab of the current workspace. |
-| Next Workspace | `Command-Option-]` | Select the next workspace in display order. |
-| Previous Workspace | `Command-Option-[` | Select the previous workspace in display order. |
-| Go to Workspace 1–8 / Last | `Control-1` … `Control-8`, `Control-9` | Select the Nth workspace, or the last one for 9. Keys without a matching workspace go to the terminal. |
+| Command | Default shortcut | Action | Behavior |
+| --- | --- | --- | --- |
+| New Window | `Command-Shift-N` | `new_window` | Create a new application window with one workspace and one tab. |
+| Close Window | `Control-Command-W` | `close_window` | Close the application window, including every workspace in it. |
+| Close All Windows | `Command-Option-Shift-W` | `close_all_windows` | Close every window. |
+| Merge All Windows | None (Window menu) | — | Move every other window's workspaces into this one. |
+| Move Tab to New Window | None (menus) | `move_tab_to_new_window` | Move the shown tab into a new window. |
+| New Workspace | `Command-N` | `new_workspace` | Create and select a workspace containing one new tab. |
+| Close Workspace | `Command-Shift-W` | `close_workspace` | Close the selected workspace and all of its tabs (8). |
+| Rename Workspace | `Command-Shift-R` | `rename_workspace` | Rename the selected workspace in place in the sidebar. |
+| Next / Previous Workspace | `Control-Shift-]` / `[` | `next_workspace` / `previous_workspace` | Select the next or previous workspace in display order, wrapping around. |
+| Go to Workspace 1–8 / Last | `Control-1` … `8`, `Control-9` | `goto_workspace:N` / `last_workspace` | Select the Nth workspace, or the last one. |
+| Move Workspace Up / Down | None (Workspace menu) | `move_workspace:-1` / `1` | Move the selected workspace in the sidebar, wrapping around. |
+| Move Tab to Previous / Next Workspace | None | `move_tab_to_workspace:-1` / `1` | Move the shown tab to the neighboring workspace and follow it. |
+| Hide/Show Sidebar | `Command-B` | `toggle_sidebar` | Show or hide the workspace sidebar (View menu, titlebar button). |
+| New Tab | `Command-T` | `new_tab` | Create a tab in the current workspace. |
+| Close | `Command-W` | `close_surface` | Close the focused split, or the tab once it has no splits, using Ghostty's existing confirmation behavior. The next tab is chosen within the same workspace. |
+| Close Tab | None (menus) | `close_tab` | Close the shown tab with all of its splits. |
+| Rename Tab | `Command-R` | `prompt_tab_title` | Rename the shown tab in place in the strip. |
+| Next / Previous Tab | `Command-Shift-]` / `[`, `Control-Tab` / `Control-Shift-Tab` | `next_tab` / `previous_tab` | Select the next or previous tab within the current workspace. |
+| Go to Tab 1–8 / Last | `Command-1` … `8`, `Command-9` | `goto_tab:N` / `last_tab` | Select the Nth tab of the current workspace, or the last one. |
+| Move Tab Left / Right | `Control-Shift-Page Up` / `Down` | `move_tab:-1` / `1` | Move the shown tab within its workspace. |
+| Reopen Closed | `Command-Shift-T` | `reopen_closed` | Reopen the most recently closed split, tab, workspace or window (see "Reopening"). |
 
 Shortcut assignments remain subject to Ghostty's configuration and conflict
-handling. Ghostty's default `new_window` binding moves from `Command-N` to
-`Command-Shift-N` so that `Command-N` is free for New Workspace.
+handling. Compared with upstream Ghostty's macOS defaults, `new_window` moves
+from `Command-N` to `Command-Shift-N`, `close_window` from `Command-Shift-W`
+to `Control-Command-W`, and `close_tab` loses `Command-Option-W`.
+`Control-Shift-[`/`]` are terminal keys that the workspace bindings take
+from programs running in the terminal; few use them, and in legacy key
+encodings they're indistinguishable from `Control-[` (Escape). The
+workspace actions and `reopen_closed` are macOS-only; GTK ignores them.
 
-The workspace commands are currently native menu items in a Workspace menu,
-which works because the terminal surface only claims keys bound in the
-Ghostty config. The final implementation should use Ghostty's action system
-rather than introducing an unrelated shortcut system.
+### Reopening
+
+`undo-timeout` defaults to 20 seconds (upstream: 5). Until a closed split,
+tab, workspace or window's undo expires, its terminals keep running, and
+Undo (`Command-Z`) or Reopen Closed (`Command-Shift-T`) brings it back as it
+was. Undo reverses the most recent action of any kind; Reopen Closed reverses
+the most recent close still undoable, even under newer actions, and pressing
+it again goes further back. Once the timeout passes, the close can't be
+reversed and Reopen Closed does nothing; no closed-item history is kept.
 
 ## 8. Workspace lifecycle
 
@@ -298,9 +318,8 @@ in the sidebar.
 ### Closing a workspace
 
 Closing a workspace closes all tabs assigned to it. It's chosen from the
-workspace row's context menu, or from the Workspace menu for the selected
-workspace (no default shortcut: `Command-Shift-W` is Close Window and
-`Control-W` belongs to the shell).
+workspace row's context menu, or from the Workspace menu or
+`Command-Shift-W` for the selected workspace.
 
 Ghostty's existing running-process confirmation behavior must be respected.
 The operation should be all-or-cancel from the user's perspective: if closing
@@ -571,9 +590,8 @@ Implemented:
 - Closing workspaces from the context menu or the Workspace menu, with one
   confirmation for all of their tabs and undo.
 - Context menus for tabs and workspaces (6.3).
-- New Workspace (`Command-N`), Next/Previous Workspace
-  (`Command-Option-]`/`[`), Go to Workspace (`Control-1`–`9`), New Window
-  moved to `Command-Shift-N`.
+- The keyboard shortcuts in 7, as Ghostty keybinding actions, including
+  Reopen Closed within a 20-second `undo-timeout`, and Merge All Windows.
 - Per-workspace tab navigation, move-tab, Close Other Tabs, and Close Tabs to
   the Right.
 - Closing tabs and workspaces with in-workspace next-tab selection; terminals

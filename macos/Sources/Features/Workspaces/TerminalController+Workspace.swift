@@ -64,13 +64,41 @@ extension TerminalController {
     }
 
     /// Selects the workspace `offset` positions away, wrapping around.
-    private func selectAdjacentWorkspace(offset: Int) {
+    /// Returns false if there's no other workspace.
+    @discardableResult
+    func selectAdjacentWorkspace(offset: Int) -> Bool {
+        guard let index = adjacentWorkspaceIndex(offset: offset) else { return false }
+        selectWorkspace(workspaceModel.workspaces[index].id)
+        return true
+    }
+
+    /// Selects the workspace numbered `number` from 1, or the last one if
+    /// there are fewer, like `goto_tab`. Returns false if there's none.
+    @discardableResult
+    func selectWorkspace(number: Int) -> Bool {
         let workspaces = workspaceModel.workspaces
-        guard workspaces.count > 1,
+        guard number >= 1, !workspaces.isEmpty else { return false }
+        selectWorkspace(workspaces[min(number, workspaces.count) - 1].id)
+        return true
+    }
+
+    /// Selects the last workspace. Returns false if there's no workspace.
+    @discardableResult
+    func selectLastWorkspace() -> Bool {
+        guard let last = workspaceModel.workspaces.last else { return false }
+        selectWorkspace(last.id)
+        return true
+    }
+
+    /// The index of the workspace `offset` positions from the selected one,
+    /// wrapping around, or nil if there's no other workspace.
+    private func adjacentWorkspaceIndex(offset: Int) -> Int? {
+        let count = workspaceModel.workspaces.count
+        guard count > 1,
               let id = workspaceModel.selectedWorkspaceID,
-              let index = workspaceModel.workspaceIndex(of: id) else { return }
-        let count = workspaces.count
-        selectWorkspace(workspaces[((index + offset) % count + count) % count].id)
+              let index = workspaceModel.workspaceIndex(of: id) else { return nil }
+        // Reduced first, so a huge configured offset can't overflow.
+        return (index + offset % count + count) % count
     }
 
     /// Unfocuses and occludes a tab's terminals as it leaves the window, so
@@ -245,28 +273,30 @@ extension TerminalController {
 
         let workspace = workspaceModel.workspaces[location.workspace]
 
-        // The undo keeps the tab, and so its terminals, alive until it expires.
-        if let undoManager {
-            let placement = TabPlacement(
-                index: location.tab,
-                workspace: workspace.id,
-                customName: workspace.customName,
-                workspaceOrder: workspaceModel.workspaces.map(\.id),
-                wasShown: tab === selectedTab,
-                wasCurrent: workspace.selectedTab === tab)
-            undoManager.setActionName("Close Tab")
-            undoManager.registerUndo(
-                withTarget: self,
-                expiresAfter: undoExpiration
-            ) { target in
-                target.reinsert(tab, at: placement)
+        recordingClose {
+            // The undo keeps the tab, and so its terminals, alive until it expires.
+            if let undoManager {
+                let placement = TabPlacement(
+                    index: location.tab,
+                    workspace: workspace.id,
+                    customName: workspace.customName,
+                    workspaceOrder: workspaceModel.workspaces.map(\.id),
+                    wasShown: tab === selectedTab,
+                    wasCurrent: workspace.selectedTab === tab)
+                undoManager.setActionName("Close Tab")
+                undoManager.registerUndo(
+                    withTarget: self,
+                    expiresAfter: undoExpiration
+                ) { target in
+                    target.reinsert(tab, at: placement)
 
-                if registerRedo {
-                    undoManager.registerUndo(
-                        withTarget: target,
-                        expiresAfter: target.undoExpiration
-                    ) { target in
-                        target.closeTabImmediately(tab)
+                    if registerRedo {
+                        undoManager.registerUndo(
+                            withTarget: target,
+                            expiresAfter: target.undoExpiration
+                        ) { target in
+                            target.closeTabImmediately(tab)
+                        }
                     }
                 }
             }
@@ -361,38 +391,40 @@ extension TerminalController {
         }
 
         let shown = selectedTab
-        undoManager?.beginUndoGrouping()
-        defer { undoManager?.endUndoGrouping() }
+        recordingClose {
+            undoManager?.beginUndoGrouping()
+            defer { undoManager?.endUndoGrouping() }
 
-        // Registered before the tabs close so that, undone in reverse, it runs
-        // once they're back: it shows the tab that was shown, and makes the
-        // redo for the whole action (the tabs register none).
-        if let undoManager {
-            undoManager.registerUndo(
-                withTarget: self,
-                expiresAfter: undoExpiration
-            ) { target in
-                if let shown { target.selectTab(shown) }
-
+            // Registered before the tabs close so that, undone in reverse, it runs
+            // once they're back: it shows the tab that was shown, and makes the
+            // redo for the whole action (the tabs register none).
+            if let undoManager {
                 undoManager.registerUndo(
-                    withTarget: target,
-                    expiresAfter: target.undoExpiration
+                    withTarget: self,
+                    expiresAfter: undoExpiration
                 ) { target in
-                    target.closeImmediately(tabs, showing: replacement, actionName: actionName)
+                    if let shown { target.selectTab(shown) }
+
+                    undoManager.registerUndo(
+                        withTarget: target,
+                        expiresAfter: target.undoExpiration
+                    ) { target in
+                        target.closeImmediately(tabs, showing: replacement, actionName: actionName)
+                    }
                 }
             }
-        }
 
-        if let shown, let replacement, tabs.contains(where: { $0 === shown }) {
-            selectTab(replacement)
-        }
+            if let shown, let replacement, tabs.contains(where: { $0 === shown }) {
+                selectTab(replacement)
+            }
 
-        // Each tab's undo puts it back, recreating its workspace if it was
-        // gone; undone in reverse, they return in order.
-        for tab in tabs {
-            closeTabImmediately(tab, registerRedo: false)
+            // Each tab's undo puts it back, recreating its workspace if it was
+            // gone; undone in reverse, they return in order.
+            for tab in tabs {
+                closeTabImmediately(tab, registerRedo: false)
+            }
+            undoManager?.setActionName(actionName)
         }
-        undoManager?.setActionName(actionName)
     }
 
     /// Takes a tab out of the window. If it's the shown tab, the tab to its
@@ -482,7 +514,9 @@ extension TerminalController {
         if tab.focusedSurface.map({ !tree.contains($0) }) ?? true {
             tab.focusedSurface = tree.root?.leftmostLeaf()
         }
-        registerSurfaceTreeUndo(from: oldTree, to: tree, undoAction: "Close Terminal")
+        recordingClose {
+            registerSurfaceTreeUndo(from: oldTree, to: tree, undoAction: "Close Terminal")
+        }
     }
 
     // MARK: Moving
@@ -497,6 +531,33 @@ extension TerminalController {
               workspaceModel.workspaceIndex(of: id) != nil else { return }
         selectTab(tab)
         workspaceModel.transfer(tab, toWorkspace: id)
+    }
+
+    /// Moves the selected workspace `offset` positions in the sidebar,
+    /// wrapping around like `move_tab`. Returns false if there's no other
+    /// workspace.
+    @discardableResult
+    func moveSelectedWorkspace(by offset: Int) -> Bool {
+        guard let id = workspaceModel.selectedWorkspaceID,
+              let index = adjacentWorkspaceIndex(offset: offset) else { return false }
+        workspaceModel.moveWorkspace(id, to: index)
+        return true
+    }
+
+    /// Moves the shown tab to the workspace `offset` positions away, wrapping
+    /// around, and follows it there. Returns false if there's no other
+    /// workspace.
+    @discardableResult
+    func moveSelectedTab(toWorkspaceBy offset: Int) -> Bool {
+        guard let tab = selectedTab,
+              let index = adjacentWorkspaceIndex(offset: offset) else { return false }
+        moveTab(tab, toWorkspace: workspaceModel.workspaces[index].id)
+        return true
+    }
+
+    /// Whether Merge All Windows has another window to merge.
+    var canMergeAllWindows: Bool {
+        supportsTabs && TerminalController.all.contains { $0 !== self && $0.supportsTabs }
     }
 
     /// Moves a tab into a new workspace, at the end, and follows it there.
@@ -730,22 +791,14 @@ extension TerminalController {
         addTab(withBaseConfig: config, inWorkspace: workspaceModel.addWorkspace())
     }
 
-    /// Selects workspace `sender.tag` (1-based), or the last one for 9.
+    /// Selects workspace `sender.tag` (from 1), or the last one for 9, like
+    /// the tabs' Cmd+1-9.
     @IBAction func selectWorkspaceByNumber(_ sender: NSMenuItem) {
-        guard let workspace = workspaceNumbered(sender.tag) else { return }
-        selectWorkspace(workspace.id)
-    }
-
-    /// Whether the workspace for a numbered menu item exists. When it
-    /// doesn't, the item is disabled so its key goes to the terminal.
-    func canSelectWorkspace(numbered number: Int) -> Bool {
-        workspaceNumbered(number) != nil
-    }
-
-    private func workspaceNumbered(_ number: Int) -> Workspace? {
-        let workspaces = workspaceModel.workspaces
-        if number == 9 { return workspaces.last }
-        return workspaces.indices.contains(number - 1) ? workspaces[number - 1] : nil
+        if sender.tag == 9 {
+            selectLastWorkspace()
+        } else {
+            selectWorkspace(number: sender.tag)
+        }
     }
 
     @IBAction func selectNextWorkspace(_ sender: Any?) {
@@ -754,5 +807,34 @@ extension TerminalController {
 
     @IBAction func selectPreviousWorkspace(_ sender: Any?) {
         selectAdjacentWorkspace(offset: -1)
+    }
+
+    @IBAction func moveWorkspaceUp(_ sender: Any?) {
+        moveSelectedWorkspace(by: -1)
+    }
+
+    @IBAction func moveWorkspaceDown(_ sender: Any?) {
+        moveSelectedWorkspace(by: 1)
+    }
+
+    @IBAction func moveTabToPreviousWorkspace(_ sender: Any?) {
+        moveSelectedTab(toWorkspaceBy: -1)
+    }
+
+    @IBAction func moveTabToNextWorkspace(_ sender: Any?) {
+        moveSelectedTab(toWorkspaceBy: 1)
+    }
+
+    /// Moves every other window's workspaces into this window, after its
+    /// own, closing those windows. The shown workspace stays shown. Like
+    /// other moves between windows, this can't be undone.
+    @IBAction func mergeAllWindows(_ sender: Any?) {
+        guard supportsTabs, let shown = workspaceModel.selectedWorkspaceID else { return }
+        for other in TerminalController.all where other !== self && other.supportsTabs {
+            for workspace in other.workspaceModel.workspaces {
+                receive(workspace: workspace.id, from: other, at: workspaceModel.workspaces.count)
+            }
+        }
+        selectWorkspace(shown)
     }
 }

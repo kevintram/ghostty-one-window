@@ -811,6 +811,14 @@ pub const Application = extern struct {
             .check_for_updates,
             .undo,
             .redo,
+            .new_workspace,
+            .close_workspace,
+            .rename_workspace,
+            .goto_workspace,
+            .move_workspace,
+            .move_tab_to_workspace,
+            .toggle_sidebar,
+            .reopen_closed,
             => {
                 log.warn("unimplemented action={}", .{action});
                 return false;

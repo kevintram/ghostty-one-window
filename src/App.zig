@@ -458,6 +458,7 @@ pub fn performAction(
         .check_for_updates => _ = try rt_app.performAction(.app, .check_for_updates, {}),
         .show_gtk_inspector => _ = try rt_app.performAction(.app, .show_gtk_inspector, {}),
         .undo => _ = try rt_app.performAction(.app, .undo, {}),
+        .reopen_closed => _ = try rt_app.performAction(.app, .reopen_closed, {}),
 
         .redo => _ = try rt_app.performAction(.app, .redo, {}),
     }

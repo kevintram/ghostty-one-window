@@ -629,6 +629,58 @@ extension Ghostty {
             case GHOSTTY_ACTION_GOTO_TAB:
                 return gotoTab(app, target: target, tab: action.action.goto_tab)
 
+            case GHOSTTY_ACTION_NEW_WORKSPACE:
+                return performWorkspaceAction(target: target, name: "new workspace") {
+                    $0.newWorkspace(nil)
+                    return true
+                }
+
+            case GHOSTTY_ACTION_CLOSE_WORKSPACE:
+                return performWorkspaceAction(target: target, name: "close workspace") {
+                    $0.closeWorkspace(nil)
+                    return true
+                }
+
+            case GHOSTTY_ACTION_RENAME_WORKSPACE:
+                return performWorkspaceAction(target: target, name: "rename workspace") {
+                    $0.renameWorkspace(nil)
+                    return true
+                }
+
+            case GHOSTTY_ACTION_GOTO_WORKSPACE:
+                let workspace = action.action.goto_workspace
+                return performWorkspaceAction(target: target, name: "goto workspace") { controller in
+                    switch workspace {
+                    case GHOSTTY_GOTO_TAB_PREVIOUS: controller.selectAdjacentWorkspace(offset: -1)
+                    case GHOSTTY_GOTO_TAB_NEXT: controller.selectAdjacentWorkspace(offset: 1)
+                    case GHOSTTY_GOTO_TAB_LAST: controller.selectLastWorkspace()
+                    default: controller.selectWorkspace(number: Int(workspace.rawValue))
+                    }
+                }
+
+            case GHOSTTY_ACTION_MOVE_WORKSPACE:
+                let amount = action.action.move_workspace.amount
+                return performWorkspaceAction(target: target, name: "move workspace") {
+                    $0.moveSelectedWorkspace(by: amount)
+                }
+
+            case GHOSTTY_ACTION_MOVE_TAB_TO_WORKSPACE:
+                let amount = action.action.move_tab_to_workspace.amount
+                return performWorkspaceAction(target: target, name: "move tab to workspace") {
+                    $0.moveSelectedTab(toWorkspaceBy: amount)
+                }
+
+            case GHOSTTY_ACTION_TOGGLE_SIDEBAR:
+                return performWorkspaceAction(target: target, name: "toggle sidebar") {
+                    $0.workspaceModel.isSidebarCollapsed.toggle()
+                    return true
+                }
+
+            case GHOSTTY_ACTION_REOPEN_CLOSED:
+                return MainActor.assumeIsolated {
+                    (NSApp.delegate as? AppDelegate)?.undoManager.reopenLastClosed() ?? false
+                }
+
             case GHOSTTY_ACTION_GOTO_SPLIT:
                 return gotoSplit(app, target: target, direction: action.action.goto_split)
 
@@ -1284,6 +1336,36 @@ extension Ghostty {
                 }
 
                 return true
+        }
+
+        /// Performs a workspace action on the window of the target surface,
+        /// if that window has workspaces. Returns false if it doesn't, or if
+        /// `perform` did nothing.
+        private static func performWorkspaceAction(
+            target: ghostty_target_s,
+            name: String,
+            _ perform: @MainActor (TerminalController) -> Bool
+        ) -> Bool {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                Ghostty.logger.warning("\(name, privacy: .public) does nothing with an app target")
+                return false
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface,
+                      let surfaceView = self.surfaceView(from: surface) else { return false }
+
+                // Actions are performed on the main thread.
+                return MainActor.assumeIsolated {
+                    guard let controller = BaseTerminalController.controller(owning: surfaceView) as? TerminalController,
+                          controller.supportsTabs else { return false }
+                    return perform(controller)
+                }
+
+            default:
+                assertionFailure()
+                return false
+            }
         }
 
         /// Whether the surface's workspace has other tabs to go or move to.

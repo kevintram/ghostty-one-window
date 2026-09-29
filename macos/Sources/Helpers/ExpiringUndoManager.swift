@@ -16,6 +16,15 @@ class ExpiringUndoManager: UndoManager {
     /// is called with the real target.
     private lazy var expiringTargets: Set<ExpiringTarget> = []
 
+    /// The closes that `reopenLastClosed` can undo, oldest first: each is the
+    /// undo actions its close registered, in order. A close stays here while
+    /// all of its actions can still be undone.
+    private var closes: [[ReopenAction]] = []
+
+    /// The undo actions of the close being recorded, if one is (see
+    /// `recordClose`).
+    private var recordingClose: [ReopenAction]?
+
     /// Registers an undo operation that automatically expires after the specified duration.
     ///
     /// - Parameters:
@@ -45,9 +54,68 @@ class ExpiringUndoManager: UndoManager {
 
         super.registerUndo(withTarget: expiringTarget) { [weak self] expiringTarget in
             self?.expiringTargets.remove(expiringTarget)
+            self?.pruneCloses()
             guard let target = expiringTarget.target as? TargetType else { return }
             handler(target)
         }
+
+        // What an undo registers is a redo, not part of the close.
+        if recordingClose != nil, !isUndoing {
+            recordingClose?.append(ReopenAction(target: expiringTarget) {
+                guard let target = expiringTarget.target as? TargetType else { return }
+                handler(target)
+            })
+        }
+    }
+
+    /// Runs `body`, which closes something (a split, tab, workspace or
+    /// window) and registers the undo that brings it back, so that
+    /// `reopenLastClosed` can undo it later even under newer actions. A close
+    /// within another (e.g. each tab of a closing workspace) is part of it.
+    func recordClose(_ body: () -> Void) {
+        guard recordingClose == nil else { return body() }
+        recordingClose = []
+        defer { recordingClose = nil }
+        body()
+        if let actions = recordingClose, !actions.isEmpty {
+            closes.append(actions)
+        }
+    }
+
+    /// Whether there's a close `reopenLastClosed` can undo.
+    var canReopenClosed: Bool {
+        closes.contains(where: canReopen)
+    }
+
+    /// Undoes the most recent close that can still be undone, even if newer
+    /// actions are above it on the undo stack, and takes its undo off the
+    /// stack. What its undo registers (e.g. redoing the close) becomes
+    /// undoable. Returns false if there's no close to reopen.
+    @discardableResult
+    func reopenLastClosed() -> Bool {
+        pruneCloses()
+        guard let actions = closes.popLast() else { return false }
+
+        actions.forEach { removeAllActions(withTarget: $0.target) }
+
+        // In reverse, as undo runs a group. What they register is grouped by
+        // the event that asked for the reopen, like any action's.
+        actions.reversed().forEach { $0.perform() }
+        return true
+    }
+
+    /// Drops the closes that can no longer be reopened, as soon as any of
+    /// their undo actions is undone, removed or expired. Their actions hold
+    /// what the close keeps alive (e.g. a tab's terminals), which must end
+    /// when the undo does.
+    private func pruneCloses() {
+        closes.removeAll { !canReopen($0) }
+    }
+
+    /// Whether every undo action of a close is still on the undo stack, with
+    /// its target.
+    private func canReopen(_ actions: [ReopenAction]) -> Bool {
+        actions.allSatisfy { expiringTargets.contains($0.target) && $0.target.target != nil }
     }
 
     /// Removes all undo and redo operations from the undo manager.
@@ -57,6 +125,7 @@ class ExpiringUndoManager: UndoManager {
     override func removeAllActions() {
         super.removeAllActions()
         expiringTargets = []
+        closes = []
     }
 
     /// Removes all undo and redo operations involving the specified target.
@@ -69,7 +138,8 @@ class ExpiringUndoManager: UndoManager {
         // Call super to handle standard removal
         super.removeAllActions(withTarget: target)
 
-        // If the target is an expiring target, remove it.
+        // If the target is an expiring target, remove it. That's also how
+        // an undo action expires.
         if let expiring = target as? ExpiringTarget {
             expiringTargets.remove(expiring)
         } else {
@@ -83,7 +153,16 @@ class ExpiringUndoManager: UndoManager {
                     expiringTargets.remove($0)
                 }
         }
+
+        pruneCloses()
     }
+}
+
+/// An undo action of a close, to run it outside the undo stack (see
+/// `ExpiringUndoManager.reopenLastClosed`).
+private struct ReopenAction {
+    let target: ExpiringTarget
+    let perform: () -> Void
 }
 
 /// A target object for ExpiringUndoManager that removes itself from the

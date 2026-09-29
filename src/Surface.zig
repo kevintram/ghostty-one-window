@@ -5419,6 +5419,58 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        .new_workspace => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .new_workspace,
+            {},
+        ),
+
+        .close_workspace => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .close_workspace,
+            {},
+        ),
+
+        .rename_workspace => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .rename_workspace,
+            {},
+        ),
+
+        inline .previous_workspace,
+        .next_workspace,
+        .last_workspace,
+        .goto_workspace,
+        => |v, tag| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .goto_workspace,
+            switch (tag) {
+                .previous_workspace => .previous,
+                .next_workspace => .next,
+                .last_workspace => .last,
+                .goto_workspace => @enumFromInt(v),
+                else => comptime unreachable,
+            },
+        ),
+
+        .move_workspace => |position| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .move_workspace,
+            .{ .amount = position },
+        ),
+
+        .move_tab_to_workspace => |position| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .move_tab_to_workspace,
+            .{ .amount = position },
+        ),
+
+        .toggle_sidebar => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .toggle_sidebar,
+            {},
+        ),
+
         .new_split => |direction| return try self.rt_app.performAction(
             .{ .surface = self },
             .new_split,

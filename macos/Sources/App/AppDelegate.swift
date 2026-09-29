@@ -110,6 +110,10 @@ class AppDelegate: NSObject,
     /// The global undo manager for app-level state such as window restoration.
     lazy var undoManager = ExpiringUndoManager()
 
+    /// Menu items added in code (see `installMenuItems`), with the
+    /// Ghostty action whose keybinding they show.
+    var codeMenuShortcuts: [(action: String, item: NSMenuItem)] = []
+
     /// The current state of the quick terminal.
     private var quickTerminalControllerState: QuickTerminalState = .uninitialized
 
@@ -238,7 +242,7 @@ class AppDelegate: NSObject,
         // This registers the Ghostty => Services menu to exist.
         NSApp.servicesMenu = menuServices
 
-        installWorkspaceMenu()
+        installMenuItems()
 
         // Setup a local event monitor for app-level keyboard shortcuts. See
         // localEventHandler for more info why.
@@ -1035,6 +1039,11 @@ class AppDelegate: NSObject,
         undoManager.redo()
     }
 
+    /// Reopens the most recently closed split, tab, workspace or window.
+    @IBAction func reopenClosed(_ sender: Any?) {
+        undoManager.reopenLastClosed()
+    }
+
     private struct DerivedConfig {
         let initialWindow: Bool
         let shouldQuitAfterLastWindowClosed: Bool
@@ -1154,7 +1163,7 @@ extension AppDelegate {
     }
 
     /// Sync all of our menu item keyboard shortcuts with the Ghostty configuration.
-    @MainActor private func syncMenuShortcuts(_ config: Ghostty.Config) {
+    @MainActor func syncMenuShortcuts(_ config: Ghostty.Config) {
         guard ghostty.readiness == .ready else { return }
 
         menuShortcutManager.reset()
@@ -1214,6 +1223,10 @@ extension AppDelegate {
         syncMenuShortcut(config, action: "toggle_command_palette", menuItem: self.menuCommandPalette)
 
         syncMenuShortcut(config, action: "toggle_secure_input", menuItem: self.menuSecureInput)
+
+        for (action, item) in codeMenuShortcuts {
+            syncMenuShortcut(config, action: action, menuItem: item)
+        }
 
         // This menu item is NOT synced with the configuration because it disables macOS
         // global fullscreen keyboard shortcut. The shortcut in the Ghostty config will continue
@@ -1310,6 +1323,9 @@ extension AppDelegate: NSMenuItemValidation {
                 item.title = "Redo"
             }
             return undoManager.canRedo
+
+        case #selector(reopenClosed(_:)):
+            return undoManager.canReopenClosed
 
         default:
             return true

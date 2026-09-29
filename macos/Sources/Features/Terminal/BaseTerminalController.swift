@@ -577,16 +577,25 @@ class BaseTerminalController: NSWindowController,
             nil
         }
 
-        replaceSurfaceTree(
-            surfaceTree.removing(node),
-            // When a non-focused surface is removed and this window stays as the key window,
-            // we should refocus the `focusedSurface` to make sure the window's firstResponder remains as it is.
-            //
-            // This is a weird workaround, since `resignFirstResponder` wasn't called on `focusedSurface` after drag,
-            // but the first responder became the window itself.
-            moveFocusTo: nextFocus ?? focusedSurface,
-            undoAction: "Close Terminal"
-        )
+        recordingClose {
+            replaceSurfaceTree(
+                surfaceTree.removing(node),
+                // When a non-focused surface is removed and this window stays as the key window,
+                // we should refocus the `focusedSurface` to make sure the window's firstResponder remains as it is.
+                //
+                // This is a weird workaround, since `resignFirstResponder` wasn't called on `focusedSurface` after drag,
+                // but the first responder became the window itself.
+                moveFocusTo: nextFocus ?? focusedSurface,
+                undoAction: "Close Terminal"
+            )
+        }
+    }
+
+    /// Runs `body`, which closes something and registers its undo, so that
+    /// Reopen Closed can undo it later (see `ExpiringUndoManager.recordClose`).
+    func recordingClose(_ body: () -> Void) {
+        guard let undoManager else { return body() }
+        undoManager.recordClose(body)
     }
 
     func replaceSurfaceTree(

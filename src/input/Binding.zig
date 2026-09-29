@@ -597,6 +597,72 @@ pub const Action = union(enum) {
     /// found by running `ghostty +version`.
     toggle_tab_overview,
 
+    /// Open a new workspace, with one new tab, in the current window.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    new_workspace,
+
+    /// Close the current workspace with all of its tabs, asking first if
+    /// any of their terminals has a running process. Closing the window's
+    /// last workspace closes the window.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    close_workspace,
+
+    /// Rename the current workspace in place in the sidebar.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    rename_workspace,
+
+    /// Go to the previous workspace.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    previous_workspace,
+
+    /// Go to the next workspace.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    next_workspace,
+
+    /// Go to the last workspace.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    last_workspace,
+
+    /// Go to the workspace with the specific index, starting from 1.
+    ///
+    /// If the workspace number is higher than the number of workspaces,
+    /// this will go to the last workspace.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    goto_workspace: usize,
+
+    /// Moves the current workspace by a relative offset in the sidebar,
+    /// wrapping around cyclically like `move_tab`.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    move_workspace: isize,
+
+    /// Moves the current tab to the workspace a relative offset away,
+    /// wrapping around cyclically, and follows it there. For example,
+    /// `move_tab_to_workspace:1` moves it to the next workspace.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    move_tab_to_workspace: isize,
+
+    /// Show or hide the workspace sidebar.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    toggle_sidebar,
+
+    /// Reopen the most recently closed split, tab, workspace or window,
+    /// even if other actions came after it. Pressing it again reopens the
+    /// one closed before that. Only closes that can still be undone can be
+    /// reopened, so this is limited by `undo-timeout`.
+    ///
+    /// Only supported on macOS.
+    reopen_closed,
+
     /// Change the title of the current focused surface via a pop-up prompt.
     prompt_surface_title,
 
@@ -1375,6 +1441,7 @@ pub const Action = union(enum) {
             .new_window,
             .undo,
             .redo,
+            .reopen_closed,
             => .app,
 
             // Obviously surface actions.
@@ -1451,6 +1518,16 @@ pub const Action = union(enum) {
             .move_tab,
             .move_tab_to_new_window,
             .toggle_tab_overview,
+            .new_workspace,
+            .close_workspace,
+            .rename_workspace,
+            .previous_workspace,
+            .next_workspace,
+            .last_workspace,
+            .goto_workspace,
+            .move_workspace,
+            .move_tab_to_workspace,
+            .toggle_sidebar,
             .new_split,
             .goto_split,
             .goto_window,

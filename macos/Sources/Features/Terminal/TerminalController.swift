@@ -611,7 +611,9 @@ class TerminalController: BaseTerminalController {
 
         cancelPendingInitialPresentation()
 
-        registerUndoForCloseWindow()
+        recordingClose {
+            registerUndoForCloseWindow()
+        }
 
         window.close()
     }
@@ -668,10 +670,13 @@ class TerminalController: BaseTerminalController {
 
     static private func closeAllWindowsImmediately() {
         let undoManager = (NSApp.delegate as? AppDelegate)?.undoManager
-        undoManager?.beginUndoGrouping()
-        all.forEach { $0.closeWindowImmediately() }
-        undoManager?.setActionName("Close All Windows")
-        undoManager?.endUndoGrouping()
+        let closeAll = {
+            undoManager?.beginUndoGrouping()
+            all.forEach { $0.closeWindowImmediately() }
+            undoManager?.setActionName("Close All Windows")
+            undoManager?.endUndoGrouping()
+        }
+        if let undoManager { undoManager.recordClose(closeAll) } else { closeAll() }
     }
 
     // MARK: Undo/Redo
@@ -1186,14 +1191,16 @@ extension TerminalController {
             guard let selectedTab else { return false }
             return !workspaceModel.tabs(rightOf: selectedTab).isEmpty
 
-        case #selector(selectNextWorkspace), #selector(selectPreviousWorkspace):
+        case #selector(selectNextWorkspace), #selector(selectPreviousWorkspace),
+             #selector(moveWorkspaceUp), #selector(moveWorkspaceDown),
+             #selector(moveTabToPreviousWorkspace), #selector(moveTabToNextWorkspace):
             return workspaceModel.workspaces.count > 1
 
-        case #selector(renameWorkspace), #selector(closeWorkspace):
-            return supportsTabs
+        case #selector(mergeAllWindows(_:)):
+            return canMergeAllWindows
 
-        case #selector(selectWorkspaceByNumber):
-            return canSelectWorkspace(numbered: item.tag)
+        case #selector(renameWorkspace), #selector(closeWorkspace), #selector(selectWorkspaceByNumber):
+            return supportsTabs
 
         case #selector(returnToDefaultSize):
             guard let window else { return false }
