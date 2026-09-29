@@ -24,9 +24,22 @@ private struct TabStrip: View {
     /// The strip's width, which the tabs share (see `tabWidths`).
     @State private var width: CGFloat = 0
 
+    /// While tabs are closed one after another with the mouse, the number of
+    /// tabs the strip keeps sizing its tabs for, as in Safari and Chrome, so
+    /// the next tab's close button stays under the pointer (see `releaseHold`).
+    @State private var hold: Hold?
+
+    private struct Hold: Equatable {
+        let count: Int
+
+        /// New with every close, restarting the wait before it's let go.
+        let close = UUID()
+    }
+
     private static let spacing: CGFloat = 4
     private static let inset = (WorkspaceModel.tabStripHeight - 24) / 2
     private static let newTabWidth: CGFloat = 24
+    private static let holdDuration: Duration = .seconds(1)
     private static let slideDuration = 0.15
     private static let slide = Animation.easeOut(duration: slideDuration)
 
@@ -35,7 +48,7 @@ private struct TabStrip: View {
         // dragged in from another window shows as selected, as it will be.
         let selected = model.incomingTab ?? model.selectedTab
         let tabs = displayedTabs.filter { phase(of: $0) != .draggingOut }
-        let widths = tabWidths(count: tabs.count, includingSelected: tabs.contains { $0 === selected })
+        let widths = tabWidths(count: sizingCount(tabs.count), includingSelected: tabs.contains { $0 === selected })
 
         HStack(spacing: Self.spacing) {
             ForEach(tabs) { tab in
@@ -48,7 +61,9 @@ private struct TabStrip: View {
                     controller.value?.endRenamingTab(tab, title: title)
                 } select: {
                     controller.value?.selectTab(tab)
-                } close: {
+                } close: { byMouse in
+                    // A confirmation interrupts the clicking anyway.
+                    if byMouse, !tab.needsConfirmQuit { hold = Hold(count: sizingCount(tabs.count)) }
                     controller.value?.close(tab: tab)
                 }
                 .offset(x: offset(of: tab))
@@ -78,10 +93,36 @@ private struct TabStrip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: WorkspaceModel.tabStripHeight)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .task(id: hold) {
+            guard hold != nil else { return }
+            try? await Task.sleep(for: Self.holdDuration)
+            if !Task.isCancelled { releaseHold() }
+        }
+        .onChange(of: model.selectedWorkspaceID) { _ in hold = nil }
+        .onChange(of: drag == nil) { idle in
+            if idle { releaseHold() }
+        }
         // Shown over the terminal only to take a dragged tab.
         .background { if !model.reservesTabStrip { Rectangle().fill(.bar) } }
         .contentShape(Rectangle())
+        .onHover { inside in
+            if !inside { releaseHold() }
+        }
         .onDrop(of: [.ghosttyWorkspaceTab], delegate: self)
+    }
+
+    /// How many tabs to size the tabs for when the strip shows `count`: at
+    /// least as many as are held (see `hold`).
+    private func sizingCount(_ count: Int) -> Int {
+        max(count, hold?.count ?? 0)
+    }
+
+    /// Lets go of the held tab count, once the pointer leaves the strip, a
+    /// moment after the last close, or after a drag, so the tabs grow into
+    /// the room. Not during a drag, whose slots were measured when it began.
+    private func releaseHold() {
+        guard hold != nil, drag == nil else { return }
+        withAnimation(Self.slide) { hold = nil }
     }
 
     /// The widths of the selected tab and the others when the strip holds
@@ -110,7 +151,7 @@ private struct TabStrip: View {
     /// another window, which shows as selected.
     private var slots: ReorderSlots {
         let count = displayedTabs.count
-        let widths = tabWidths(count: count, includingSelected: true)
+        let widths = tabWidths(count: sizingCount(count), includingSelected: true)
         return ReorderSlots(
             count: count,
             stride: widths.other + Self.spacing,
@@ -352,7 +393,7 @@ private struct TabButton: View {
     let isRenaming: Bool
     let endRenaming: (_ title: String?) -> Void
     let select: () -> Void
-    let close: () -> Void
+    let close: (_ byMouse: Bool) -> Void
 
     @State private var hovering = false
 
@@ -477,7 +518,7 @@ private struct TabButton: View {
 
     private var closeButton: some View {
         Button {
-            close()
+            close(NSApp.currentEvent?.type == .leftMouseUp)
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 9, weight: .semibold))
