@@ -687,6 +687,7 @@ class TerminalController: BaseTerminalController {
         let workspaces: [Workspace]
         let selectedWorkspaceID: UUID?
         let tabColor: TerminalTabColor
+        let sidebarCollapsed: Bool
     }
 
     convenience init(_ ghostty: Ghostty.App, with undoState: UndoState) {
@@ -694,6 +695,7 @@ class TerminalController: BaseTerminalController {
             ?? undoState.workspaces.first?.selectedTab
         self.init(ghostty, withSurfaceTree: selected?.surfaceTree)
         adoptWorkspaces(undoState.workspaces, selectedWorkspaceID: undoState.selectedWorkspaceID)
+        workspaceModel.isSidebarCollapsed = undoState.sidebarCollapsed
 
         // Show the window and restore its frame
         showWindow(nil)
@@ -713,7 +715,8 @@ class TerminalController: BaseTerminalController {
             frame: window.frame,
             workspaces: workspaceModel.workspaces,
             selectedWorkspaceID: workspaceModel.selectedWorkspaceID,
-            tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
+            tabColor: (window as? TerminalWindow)?.tabColor ?? .none,
+            sidebarCollapsed: workspaceModel.isSidebarCollapsed)
     }
 
     // MARK: - NSWindowController

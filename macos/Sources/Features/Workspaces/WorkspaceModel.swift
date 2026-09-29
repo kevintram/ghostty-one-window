@@ -104,7 +104,9 @@ final class WorkspaceModel: ObservableObject {
     @Published private(set) var workspaces: [Workspace] = []
     @Published private(set) var selectedWorkspaceID: UUID?
 
-    @Published var isSidebarCollapsed = false
+    /// Whether the workspace sidebar is hidden. New windows start with it
+    /// hidden; a restored or reopened window keeps its own.
+    @Published var isSidebarCollapsed = true
 
     /// What's being renamed in place, one thing at a time: a tab in the tab
     /// strip (which shows while it is, even for a single tab), or a

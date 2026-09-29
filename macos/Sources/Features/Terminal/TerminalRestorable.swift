@@ -82,6 +82,9 @@ final class TerminalRestorableState: TerminalRestorable {
     var workspaces: [WorkspaceState]? {
         internalState.workspaces
     }
+    var sidebarCollapsed: Bool? {
+        internalState.sidebarCollapsed
+    }
 
     /// Internal State we use to perform unit tests
     ///
@@ -177,8 +180,12 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         // Restore the tab title override
         c.titleOverride = state.titleOverride
 
-        // Restore the window's other tabs.
+        // Restore the window's other tabs, and its sidebar, before the
+        // window shows so it doesn't animate.
         c.restoreWorkspaces(state.workspaces)
+        if let collapsed = state.sidebarCollapsed {
+            c.workspaceModel.isSidebarCollapsed = collapsed
+        }
 
         // Setup our restored state on the controller
         // Find the focused surface in surfaceTree

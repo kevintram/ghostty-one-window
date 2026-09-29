@@ -141,7 +141,8 @@ which stays in place while the sidebar is collapsed. The same Liquid Glass
 control also holds a New Workspace button. Collapsing animates in
 the visible tab; the terminal column takes the freed width and the window
 keeps its frame. The sidebar never collapses on its own when the window is
-resized narrow.
+resized narrow. New windows start with it hidden; each window's visibility is
+saved with its state, so a restored or reopened window keeps its own.
 
 Its width, visibility, selection, and ordering belong to the window, not to
 an individual tab or workspace. There is one sidebar per window, so switching
@@ -512,10 +513,12 @@ override), and its selected tab. The window's selected tab's tree isn't
 repeated there, since decoding a tree creates its terminals; its workspace is
 the selected one.
 
-Sidebar visibility and width are runtime preferences only. Invalid workspace
-state restores the selected tab alone rather than failing.
+The state also records whether the sidebar was hidden; older state without it
+gets the default, hidden. Invalid workspace state restores the selected tab
+alone rather than failing.
 
-Undoing a window close restores all of its workspaces and tabs.
+Undoing a window close restores all of its workspaces and tabs, and its
+sidebar visibility.
 
 ## 12. Process and rendering behavior
 
@@ -599,7 +602,8 @@ Implemented:
 - Undo of closing tabs and windows.
 - Restoration of workspaces and tabs.
 - Collapsible sidebar: View → Hide/Show Sidebar (`Command-B`) and a titlebar
-  sidebar button; not persisted.
+  sidebar button; hidden in new windows, and saved per window for
+  restoration and undo.
 - AppleScript windows and tabs map to windows and `TerminalTab`s.
 - Terminals in hidden tabs: bells, notifications (clicking one selects its
   tab), `set_tab_title`, and child-exit messages.

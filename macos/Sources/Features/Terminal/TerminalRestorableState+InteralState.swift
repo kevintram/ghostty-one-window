@@ -23,6 +23,10 @@ extension TerminalRestorableState {
         /// its terminals. Its workspace is the selected one.
         var workspaces: [WorkspaceState]?
 
+        /// Whether the workspace sidebar was hidden. Nil in older state,
+        /// which gets the default.
+        var sidebarCollapsed: Bool?
+
         struct WorkspaceState: Codable {
             let customName: String?
             let tabs: [TabState]
@@ -59,6 +63,7 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
                     },
                     selectedTab: workspace.tabs.firstIndex { $0 === workspace.selectedTab } ?? 0)
             },
+            sidebarCollapsed: model.isSidebarCollapsed,
         )
     }
 }

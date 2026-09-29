@@ -62,10 +62,15 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         sidebar.maximumThickness = WorkspaceModel.sidebarWidth
         addSplitViewItem(sidebar)
 
+        // The sidebar's state is saved with the window's (see
+        // TerminalRestorableState), so a change marks it for saving.
         sidebarCollapse = model.$isSidebarCollapsed
             .removeDuplicates()
             .sink { [weak self] collapsed in
-                MainActor.assumeIsolated { self?.applySidebarState(collapsed: collapsed) }
+                MainActor.assumeIsolated {
+                    self?.applySidebarState(collapsed: collapsed)
+                    self?.controller?.invalidateRestorableState()
+                }
             }
 
         // The terminal column extends under the titlebar, so pin our tab

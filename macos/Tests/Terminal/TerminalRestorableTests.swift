@@ -107,6 +107,8 @@ struct TerminalRestorableTests {
         #expect(v7Generic.effectiveFullscreenMode == .native)
         #expect(v7Generic.tabColor == .green)
         #expect(v7Generic.titleOverride == "tip")
+        // Older state has no sidebar state; the window gets the default.
+        #expect(v7Generic.sidebarCollapsed == nil)
         #expect(v7Generic.surfaceTree.contains(where: { $0.id.uuidString == "953CE952-D91D-4D36-AC72-9D0F1F6BCE73" }))
         #expect(v7Generic.surfaceTree.contains(where: { $0.id.uuidString == "D3223569-2E01-4BC5-9DB2-DBFC3AFF46D1" }))
     }
@@ -127,7 +129,8 @@ struct TerminalRestorableTests {
                     .init(surfaceTree: other.0, focusedSurface: other.2.id.uuidString, titleOverride: "renamed"),
                     .init(surfaceTree: nil, focusedSurface: nil, titleOverride: nil),
                 ], selectedTab: 1),
-            ]))
+            ],
+            sidebarCollapsed: false))
 
         let data = try archive(CodableBridge(state), className: "CodableBridge<Terminal>")
         let v8 = try unarchive(data, className: "CodableBridge<Terminal>", as: CodableBridge<DummyTerminalRestorableState>.self)
@@ -141,6 +144,7 @@ struct TerminalRestorableTests {
         #expect(workspace.tabs[0].surfaceTree?.contains(where: { $0.id == other.1.id }) == true)
         // The selected tab's tree is the top-level one, not repeated.
         #expect(workspace.tabs[1].surfaceTree == nil)
+        #expect(v8.sidebarCollapsed == false)
     }
 }
 
