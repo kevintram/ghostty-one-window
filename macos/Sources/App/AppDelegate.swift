@@ -580,6 +580,17 @@ class AppDelegate: NSObject,
         }
     }
 
+    /// The standard text editing action for Command-X, -C or -V.
+    private static func textEditingAction(for event: NSEvent) -> Selector? {
+        guard event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else { return nil }
+        switch event.charactersIgnoringModifiers {
+        case "x": return #selector(NSText.cut(_:))
+        case "c": return #selector(NSText.copy(_:))
+        case "v": return #selector(NSText.paste(_:))
+        default: return nil
+        }
+    }
+
     private func localEventKeyDown(_ event: NSEvent) -> NSEvent? {
         // If the tab overview is visible and escape is pressed, close it.
         // This can't POSSIBLY be right and is probably a FirstResponder problem
@@ -590,6 +601,16 @@ class AppDelegate: NSObject,
            let tabGroup = window.tabGroup,
            tabGroup.isOverviewVisible {
             window.toggleTabOverview(nil)
+            return nil
+        }
+
+        // Text fields (e.g. renaming a tab or workspace) rely on the Edit
+        // menu for Cut, Copy and Paste, but those items have no shortcuts:
+        // their Ghostty bindings are performable, and the menu only shows
+        // bindings that aren't. So send the standard actions ourselves.
+        if NSApp.keyWindow?.firstResponder is NSText,
+           let action = Self.textEditingAction(for: event),
+           NSApp.sendAction(action, to: nil, from: nil) {
             return nil
         }
 
