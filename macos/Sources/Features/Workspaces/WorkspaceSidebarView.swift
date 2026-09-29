@@ -77,7 +77,6 @@ private struct WorkspaceListView: View {
                                 of: [.ghosttyWorkspaceTab],
                                 delegate: TabDropDelegate(
                                     workspace: workspace.id,
-                                    model: model,
                                     controller: controller,
                                     target: $dropTarget))
                     }
@@ -169,16 +168,16 @@ private struct WorkspaceListView: View {
     }
 }
 
-/// Accepts a tab dragged out of the tab strip, moving it to the row's
-/// workspace. Dropped on its own workspace, it goes back where it was.
+/// Accepts a tab dragged out of a tab strip, this window's or another's,
+/// moving it to the row's workspace. Dropped on its own workspace, it goes
+/// back where it was.
 private struct TabDropDelegate: DropDelegate {
     let workspace: UUID
-    let model: WorkspaceModel
     let controller: Weak<TerminalController>
     @Binding var target: UUID?
 
     func validateDrop(info: DropInfo) -> Bool {
-        draggedTab != nil
+        WorkspaceTabDragOut.dragged != nil
     }
 
     func dropEntered(info: DropInfo) {
@@ -195,15 +194,13 @@ private struct TabDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         target = nil
-        guard let tab = draggedTab else { return false }
-        controller.value?.moveTab(tab, toWorkspace: workspace)
+        guard let (tab, source) = WorkspaceTabDragOut.dragged, let controller = controller.value else { return false }
+        if source === controller {
+            controller.moveTab(tab, toWorkspace: workspace)
+        } else {
+            controller.receive(tab, from: source, inWorkspace: workspace)
+        }
         return true
-    }
-
-    /// The tab being dragged out of this window's tab strip.
-    private var draggedTab: TerminalTab? {
-        guard let drag = model.tabDrag, drag.phase == .draggingOut else { return nil }
-        return model.tab(id: drag.id)
     }
 }
 

@@ -137,6 +137,11 @@ final class WorkspaceModel: ObservableObject {
 
     @Published var tabDrag: TabDrag?
 
+    /// A tab of another window dragged over the tab strip, which shows it
+    /// after its own tabs, following the pointer (as `tabDrag`), until it's
+    /// dropped there or leaves.
+    @Published var incomingTab: TerminalTab?
+
     /// A workspace being dragged in the sidebar, and how far it's been
     /// dragged.
     struct WorkspaceDrag: Equatable {
@@ -210,6 +215,19 @@ final class WorkspaceModel: ObservableObject {
         return Array(workspaces[location.workspace].tabs[(location.tab + 1)...])
     }
 
+    /// Whether the tab strip takes room above the terminal: with 2+ tabs in
+    /// the selected workspace, or while one is renamed in it. Otherwise it's
+    /// hidden, except while a tab is dragged, when it shows over the
+    /// terminal to take the drop.
+    var reservesTabStrip: Bool {
+        Self.reservesTabStrip(tabCount: tabs.count, renaming: renaming)
+    }
+
+    static func reservesTabStrip(tabCount: Int, renaming: Renaming?) -> Bool {
+        guard case .tab = renaming else { return tabCount > 1 }
+        return true
+    }
+
     func contains(_ tab: TerminalTab) -> Bool {
         location(of: tab) != nil
     }
@@ -250,6 +268,7 @@ final class WorkspaceModel: ObservableObject {
             workspaces.remove(at: location.workspace)
         }
         if renaming == .tab(tab.id) { renaming = nil }
+        if tabDrag?.id == tab.id { tabDrag = nil }
     }
 
     /// Makes the tab the selected one, and its workspace the selected

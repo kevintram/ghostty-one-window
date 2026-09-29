@@ -84,27 +84,31 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         tabStrip.translatesAutoresizingMaskIntoConstraints = false
         detail.view.addSubview(tabStrip)
 
-        // Like the native tab bar, the strip is only shown with 2+ tabs, or
-        // while a tab is being renamed in it.
-        let tabStripHeight = tabStrip.heightAnchor.constraint(equalToConstant: 0)
-        tabStripVisibility = model.$workspaces
-            .combineLatest(model.$selectedWorkspaceID, model.$renaming)
-            .map { workspaces, selectedID, renaming in
-                let tabs = workspaces.first { $0.id == selectedID }?.tabs.count ?? 0
-                guard case .tab = renaming else { return tabs > 1 }
-                return true
+        // Like the native tab bar, the strip only takes room with 2+ tabs, or
+        // while a tab is being renamed in it. While a tab is dragged, in any
+        // window, it shows regardless to take the drop, over the terminal
+        // rather than resizing it, and until a tab dropped on it settles.
+        let terminalTop = terminalContainer.topAnchor.constraint(equalTo: detail.view.safeAreaLayoutGuide.topAnchor)
+        let tabCount = model.$workspaces.combineLatest(model.$selectedWorkspaceID) { workspaces, selectedID in
+            workspaces.first { $0.id == selectedID }?.tabs.count ?? 0
+        }
+        tabStripVisibility = tabCount
+            .combineLatest(model.$renaming, model.$incomingTab.map { $0 != nil }, WorkspaceTabDragOut.isDragging)
+            .map { (tabs: Int, renaming: WorkspaceModel.Renaming?, incoming: Bool, dragging: Bool) in
+                let reserves = WorkspaceModel.reservesTabStrip(tabCount: tabs, renaming: renaming)
+                return TabStripLayout(reserves: reserves, visible: reserves || incoming || dragging)
             }
             .removeDuplicates()
-            .sink { [weak tabStrip] visible in
+            .sink { [weak tabStrip] (strip: TabStripLayout) in
                 MainActor.assumeIsolated {
-                    tabStripHeight.constant = visible ? WorkspaceModel.tabStripHeight : 0
-                    tabStrip?.isHidden = !visible
+                    terminalTop.constant = strip.reserves ? WorkspaceModel.tabStripHeight : 0
+                    tabStrip?.isHidden = !strip.visible
                 }
             }
 
         if let splitView = splitView as? WorkspaceSplitView {
             splitView.terminalContainer = terminalContainer
-            splitView.tabStripHeight = tabStripHeight
+            splitView.terminalTop = terminalTop
             splitView.sidebarItem = sidebar
         }
 
@@ -112,8 +116,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             tabStrip.topAnchor.constraint(equalTo: detail.view.safeAreaLayoutGuide.topAnchor),
             tabStrip.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
-            tabStripHeight,
-            terminalContainer.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
+            tabStrip.heightAnchor.constraint(equalToConstant: WorkspaceModel.tabStripHeight),
+            terminalTop,
             terminalContainer.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
             terminalContainer.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
             terminalContainer.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
@@ -260,11 +264,20 @@ private struct SidebarToggle<Button: View>: View {
     }
 }
 
+/// Whether the tab strip takes room above the terminal, and whether it
+/// shows, over the terminal if it doesn't take room.
+private struct TabStripLayout: Equatable {
+    let reserves: Bool
+    let visible: Bool
+}
+
 /// Reports the terminal's intrinsic size plus the sidebar, titlebar and tab
 /// strip so that `window-width`/`window-height` still size the terminal area.
 private final class WorkspaceSplitView: NSSplitView {
     weak var terminalContainer: TerminalViewContainer?
-    weak var tabStripHeight: NSLayoutConstraint?
+    /// The terminal's distance below the titlebar: the tab strip's height
+    /// while it takes room.
+    weak var terminalTop: NSLayoutConstraint?
     weak var sidebarItem: NSSplitViewItem?
 
     // AppKit gives each split view column its own titlebar background, with
@@ -296,6 +309,6 @@ private final class WorkspaceSplitView: NSSplitView {
 
         return NSSize(
             width: size.width + (sidebarItem?.isCollapsed ?? false ? 0 : dividerThickness + WorkspaceModel.sidebarWidth),
-            height: size.height + safeAreaInsets.top + (tabStripHeight?.constant ?? 0))
+            height: size.height + safeAreaInsets.top + (terminalTop?.constant ?? 0))
     }
 }

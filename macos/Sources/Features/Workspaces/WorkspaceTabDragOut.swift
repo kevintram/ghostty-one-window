@@ -1,16 +1,18 @@
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
 /// Drags a tab out of the tab strip as a system drag, to drop it on a
-/// workspace in the sidebar.
+/// workspace in the sidebar, on another window's tab strip, or outside every
+/// window to give it a window of its own.
 ///
 /// The tab strip reorders its tabs itself. A tab pulled out of the strip
-/// continues as a system drag, which the sidebar's workspace rows accept,
-/// with a preview of the tab under the pointer. Back over the strip, the
-/// strip shows the tab itself instead, so the preview is hidden. The
-/// pasteboard only marks the drag as a tab: the dragged tab is the model's
-/// `tabDrag`.
+/// continues as a system drag, with a preview of the tab under the pointer.
+/// While the drag lasts, every window shows its tab strip (see
+/// `isDragging`). Over a strip, its own or another window's, the strip shows
+/// the tab itself instead, so the preview is hidden. The pasteboard only
+/// marks the drag as a tab: the dragged tab and its window are `dragged`.
 ///
 /// The preview is drawn in a window of our own that follows the pointer,
 /// and the system drag has an empty image. AppKit draws drag images
@@ -21,24 +23,41 @@ final class WorkspaceTabDragOut: NSObject, NSDraggingSource {
     /// The drag in progress, kept alive until it ends.
     private static var current: WorkspaceTabDragOut?
 
-    private weak var model: WorkspaceModel?
+    /// Whether a tab is being dragged out of a strip, in any window.
+    static let isDragging = CurrentValueSubject<Bool, Never>(false)
+
+    /// The tab being dragged out of a strip, and the window it's in.
+    static var dragged: (tab: TerminalTab, source: TerminalController)? {
+        guard let current, let tab = current.tab, let source = current.source,
+              source.workspaceModel.contains(tab) else { return nil }
+        return (tab, source)
+    }
+
+    private weak var tab: TerminalTab?
+    private weak var source: TerminalController?
     private let preview: TabDragPreviewWindow
 
     /// Where the tab left the strip, on screen. A cancelled drag's preview
     /// returns toward it.
     private let origin: NSPoint
 
-    private init(model: WorkspaceModel, preview: TabDragPreviewWindow, origin: NSPoint) {
-        self.model = model
+    /// Watches for Escape, which cancels the drag rather than dropping the
+    /// tab outside every window.
+    private var escapeMonitor: Any?
+    private var cancelledByEscape = false
+
+    private init(tab: TerminalTab, source: TerminalController, preview: TabDragPreviewWindow, origin: NSPoint) {
+        self.tab = tab
+        self.source = source
         self.preview = preview
         self.origin = origin
     }
 
-    /// Begins dragging the tab from `view`, the strip it was pressed in,
-    /// with the drag event that pulled it out.
+    /// Begins dragging the tab of `source` from `view`, the strip it was
+    /// pressed in, with the drag event that pulled it out.
     static func begin(
         _ tab: TerminalTab,
-        in model: WorkspaceModel,
+        of source: TerminalController,
         from view: NSView,
         with event: NSEvent
     ) {
@@ -58,11 +77,16 @@ final class WorkspaceTabDragOut: NSObject, NSDraggingSource {
             NSRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height),
             contents: NSImage(size: size))
 
-        let source = WorkspaceTabDragOut(model: model, preview: preview, origin: origin)
-        current = source
-        let session = view.beginDraggingSession(with: [dragging], event: event, source: source)
+        let drag = WorkspaceTabDragOut(tab: tab, source: source, preview: preview, origin: origin)
+        current = drag
+        drag.escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak drag] event in
+            if event.keyCode == 53 { drag?.cancelledByEscape = true }
+            return event
+        }
+        let session = view.beginDraggingSession(with: [dragging], event: event, source: drag)
         session.animatesToStartingPositionsOnCancelOrFail = false
         session.draggingFormation = .none
+        isDragging.send(true)
 
         // The drag session consumes the release, so the strip's press
         // gesture would never end and would swallow the next press. End it.
@@ -90,28 +114,60 @@ final class WorkspaceTabDragOut: NSObject, NSDraggingSource {
     func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
         preview.center(at: screenPoint)
 
-        // The strip shows the tab while it's back over it.
-        preview.alphaValue = model?.tabDrag?.phase == .following ? 0 : 1
+        // A strip shows the tab while it's over it.
+        preview.alphaValue = modelShowingTab == nil ? 1 : 0
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        // Unless it's settling into its slot after a drop on the strip, the
-        // tab shows in the strip again: at the end of the workspace it was
-        // dropped on, or where it was if it wasn't dropped.
-        let phase = model?.tabDrag?.phase
-        if let phase, phase != .settling {
-            withAnimation(.easeOut(duration: 0.15)) { model?.tabDrag = nil }
+        defer {
+            if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+            Self.current = nil
+            Self.isDragging.send(false)
         }
 
-        // Dropped on a workspace, the tab is there; dropped on the strip, it's
-        // already back in it. Otherwise it returns to the strip, so the
-        // preview heads back toward it as it fades.
+        // Dropped outside every window, the tab gets a window of its own there.
+        if operation.isEmpty, !cancelledByEscape, let tab, let source,
+           !NSApp.windows.contains(where: { $0 !== preview && $0.isVisible && $0.frame.contains(screenPoint) }),
+           source.moveTabToNewWindow(tab, position: screenPoint) {
+            preview.orderOut(nil)
+            return
+        }
+
+        // A tab settling into a strip it was dropped on is let go once it
+        // has (see `letGo`). Otherwise it's let go now, and shows in its own
+        // strip again: at the end of the workspace it was dropped on, or
+        // where it was if it wasn't dropped.
+        if let tab, modelShowingTab?.tabDrag?.phase != .settling {
+            withAnimation(.easeOut(duration: 0.15)) { Self.letGo(tab) }
+        }
+
+        // Dropped on a workspace or a strip, the tab is there. Otherwise it
+        // returns to its strip, so the preview heads back toward it as it
+        // fades.
         if operation.isEmpty, preview.alphaValue > 0 {
             preview.dismiss(toward: origin)
         } else {
             preview.orderOut(nil)
         }
-        Self.current = nil
+    }
+
+    /// Ends a tab's drag in every window: no strip shows it dragged any more,
+    /// so it shows where it is.
+    static func letGo(_ tab: TerminalTab) {
+        for model in TerminalController.all.map(\.workspaceModel) {
+            if model.tabDrag?.id == tab.id { model.tabDrag = nil }
+            if model.incomingTab === tab { model.incomingTab = nil }
+        }
+    }
+
+    /// The model of the strip showing the dragged tab, if one is: following
+    /// the pointer, or settling where it was dropped.
+    private var modelShowingTab: WorkspaceModel? {
+        guard let tab else { return nil }
+        return TerminalController.all.lazy.map(\.workspaceModel).first {
+            guard let drag = $0.tabDrag, drag.id == tab.id else { return false }
+            return drag.phase != .draggingOut
+        }
     }
 }
 

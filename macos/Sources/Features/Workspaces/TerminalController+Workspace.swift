@@ -506,31 +506,68 @@ extension TerminalController {
     }
 
     /// Moves a tab into a new window of its own, in a workspace named after
-    /// the one it left. It stays the same tab, with its terminals, focus and
-    /// title. Returns false if it's the window's only tab.
+    /// the one it left, with its top left corner at `position` if given. It
+    /// stays the same tab, with its terminals, focus and title. Returns false
+    /// if it's the window's only tab.
     ///
-    /// This window's undo history is cleared: its entries for the tab (its
-    /// creation, its split changes) would act on this window rather than
-    /// the tab's new one. Entries expire after a few seconds anyway.
+    /// Like the native action this replaces, this can't be undone: undoing
+    /// the new window would close the tab rather than move it back.
     @discardableResult
-    func moveTabToNewWindow(_ tab: TerminalTab) -> Bool {
+    func moveTabToNewWindow(_ tab: TerminalTab, position: NSPoint? = nil) -> Bool {
         guard workspaceModel.allTabs.count > 1,
               let workspace = workspaceModel.workspace(of: tab) else { return false }
 
-        detach(tab)
+        release(tab)
 
-        // Like the native action this replaces, this can't be undone: undoing
-        // the new window would close the tab rather than move it back.
         undoManager?.disableUndoRegistration()
         defer { undoManager?.enableUndoRegistration() }
         let newController = TerminalController.newWindow(
             ghostty,
             tree: tab.surfaceTree,
+            position: position,
             inheritBackgroundOpacity: isBackgroundOpaque)
         let newWorkspace = Workspace(id: UUID(), customName: workspace.customName, tabs: [tab], selectedTabID: tab.id)
         newController.adoptWorkspaces([newWorkspace], selectedWorkspaceID: newWorkspace.id)
-        undoManager?.removeAllActions(withTarget: self)
         return true
+    }
+
+    /// Moves a tab here from another window, into a workspace (the selected
+    /// one by default) at `index` (the end by default), and shows it. It
+    /// stays the same tab, with its terminals, focus and title. If it was the
+    /// other window's last tab, that window closes. Like moving a tab into a
+    /// new window, this can't be undone.
+    func receive(
+        _ tab: TerminalTab,
+        from source: TerminalController,
+        inWorkspace id: UUID? = nil,
+        at index: Int? = nil
+    ) {
+        guard source !== self, source.workspaceModel.contains(tab),
+              let id = id ?? workspaceModel.selectedWorkspaceID,
+              workspaceModel.workspaceIndex(of: id) != nil else { return }
+
+        source.release(tab)
+        workspaceModel.insert(tab, inWorkspace: id, at: index)
+        selectTab(tab)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Takes a tab out of the window to move it to another (see `detach`).
+    /// The window's last tab closes the window, without closing the tab's
+    /// terminals or registering an undo.
+    ///
+    /// The window's undo history is cleared: its entries for the tab (its
+    /// creation, its split changes) would act on this window rather than
+    /// the tab's new one. Entries expire after a few seconds anyway.
+    private func release(_ tab: TerminalTab) {
+        undoManager?.removeAllActions(withTarget: self)
+        guard workspaceModel.allTabs.count > 1 else {
+            workspaceModel.remove(tab)
+            // An empty tree closes the window.
+            surfaceTree = .init()
+            return
+        }
+        detach(tab)
     }
 
     /// Takes over workspaces from elsewhere (a closed window being restored

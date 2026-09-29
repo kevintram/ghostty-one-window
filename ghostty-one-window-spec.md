@@ -179,16 +179,20 @@ a shrinking icon is left. The selected tab keeps a minimum width so it stays
 findable and closable. Hovering a tab shows its full title.
 
 Like Ghostty's native tab bar, the strip is hidden while the selected
-workspace has a single tab.
+workspace has a single tab, except while a tab is being dragged (in any
+window), when it shows over the terminal, without resizing it, to take the
+drop.
 
 Pressing a tab selects it right away. Dragging it along the strip reorders it
 live: it follows the pointer while the tabs it passes slide aside, and it
 settles into its slot on release. Pulling it out of the strip turns the drag
 into a system drag: the tab leaves the strip and a preview card of it follows
-the pointer, to be dropped on a workspace in the sidebar (see "Moving tabs
-between workspaces"). Dragged back over the strip, the card gives way to the
-tab itself, which rejoins the strip under the pointer. Escape, or dropping
-anywhere else, returns the tab to where it was.
+the pointer, to be dropped on a workspace in the sidebar, on another window's
+strip, or outside every window (see "Moving tabs between workspaces"). Over a
+strip, its own or another window's, the card gives way to the tab itself,
+which joins the strip under the pointer while the tabs it passes slide aside,
+and settles into its slot when dropped. Escape, or dropping anywhere else,
+returns the tab to where it was.
 
 Selecting a tab swaps its split tree into the window (see 10.3). Ghostty's
 tab navigation — `goto_tab` (index, next, previous, last), `move_tab`, Close
@@ -332,12 +336,16 @@ end of that workspace, and the selection follows it: its new workspace is
 selected with the tab. The workspace it left shows the tab's neighbor when
 switched back to. A context-menu action is a possible later addition.
 
-Dragging a tab out of its application window creates a one-tab workspace in
-the destination window (not yet implemented). If a new destination window is
-created, it gets its own workspaces. The
-new workspace uses the source workspace's name but receives its own workspace
-UUID; it is not linked to the source workspace. The terminal process and
-split tree continue without restarting.
+A tab can also be dragged to another window: dropped on that window's strip,
+it joins the selected workspace where it was dropped; dropped on one of its
+workspaces in the sidebar, it goes to the end of that workspace. Either way
+the window comes to the front showing the tab. If it was the source window's
+last tab, the source window closes, merging into the destination. Dropped
+outside every window, the tab gets a new window there, in a workspace that
+uses the source workspace's name but receives its own workspace UUID; it is
+not linked to the source workspace. The terminal process and split tree
+continue without restarting. Moving a tab between windows isn't undoable,
+and it clears the source window's undo history.
 
 If the dragged tab was the source workspace's final tab, the now-empty source
 workspace is automatically removed.
@@ -534,6 +542,8 @@ Implemented:
 - Workspace drag-to-reorder in the sidebar.
 - Tab drag-to-reorder in the strip, and moving tabs between workspaces by
   dragging them out of the strip onto the sidebar.
+- Dragging tabs between windows, onto another window's strip or sidebar, or
+  out of every window into a new one.
 - Renaming tabs in place in the strip (`Command-R`), and workspaces in place
   in the sidebar (double-click, context menu, `Command-Shift-R`).
 - Closing workspaces from the context menu or the Workspace menu, with one
@@ -560,8 +570,8 @@ Implemented:
 
 Not yet implemented:
 
-- Dragging tabs out of the application window, or between windows; moving a
-  tab into an existing window.
+- Dragging a tab that's alone in its workspace (its strip is hidden), and
+  dragging workspaces between windows.
 - Per-tab colors (the tab color is per window) and bell indicators in the tab
   strip.
 - `prompt_tab_title` targeted at a hidden terminal (it renames the shown tab);
