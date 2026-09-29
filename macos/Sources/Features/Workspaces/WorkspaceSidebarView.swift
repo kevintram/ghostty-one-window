@@ -30,17 +30,30 @@ private struct WorkspaceListView: View {
     let controller: Weak<TerminalController>
     let topInset: CGFloat
 
-    /// The workspace a tab dragged out of the tab strip would be dropped on.
+    /// The workspace a tab dragged out of a tab strip would be dropped on.
     @State private var dropTarget: UUID?
 
-    private var drag: WorkspaceModel.WorkspaceDrag? { model.workspaceDrag }
+    /// Where the rows start in the list, to find the row under a drop.
+    @State private var rowsTop: CGFloat = 0
+
+    private typealias Drag = WorkspaceModel.ReorderDrag
+
+    private var drag: Drag? { model.workspaceDrag }
 
     private static let rowHeight: CGFloat = 32
-    private static let slide = Animation.easeOut(duration: 0.15)
+    private static let slideDuration = 0.15
+    private static let slide = Animation.easeOut(duration: slideDuration)
+    private static let coordinateSpace = "WorkspaceList"
 
     // The metrics match the native sidebar list this replaced.
 
     var body: some View {
+        // A workspace dragged out of the sidebar leaves it until the drag
+        // ends. One dragged in from another window shows as selected, as it
+        // will be.
+        let selected = model.incomingWorkspace?.id ?? model.selectedWorkspaceID
+        let rows = displayedWorkspaces.filter { phase(of: $0.id) != .draggingOut }
+
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Workspaces")
@@ -49,8 +62,11 @@ private struct WorkspaceListView: View {
                     .padding(.horizontal, 4)
                     .padding(.top, 6)
                     .padding(.bottom, 2)
+                    .onGeometryChange(for: CGFloat.self) {
+                        $0.frame(in: .named(Self.coordinateSpace)).maxY
+                    } action: { rowsTop = $0 }
 
-                ForEach(Array(model.workspaces.enumerated()), id: \.element.id) { index, workspace in
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, workspace in
                     let isRenaming = model.renaming == .workspace(workspace.id)
                     // Every workspace in the list has a tab, which names it
                     // unless it has a custom name.
@@ -58,7 +74,7 @@ private struct WorkspaceListView: View {
                         WorkspaceRow(
                             workspace: workspace,
                             tab: tab,
-                            isSelected: workspace.id == model.selectedWorkspaceID,
+                            isSelected: workspace.id == selected,
                             isDropTarget: workspace.id == dropTarget,
                             isRenaming: isRenaming,
                             select: { controller.value?.selectWorkspace(workspace.id) },
@@ -66,19 +82,16 @@ private struct WorkspaceListView: View {
                             .frame(height: Self.rowHeight)
                             .offset(y: offset(at: index))
                             // The dragged row tracks the pointer; the others slide.
-                            .animation(drag?.id == workspace.id ? nil : Self.slide, value: offset(at: index))
-                            .zIndex(drag?.id == workspace.id ? 1 : 0)
+                            .animation(phase(of: workspace.id) == .following ? nil : Self.slide, value: offset(at: index))
+                            .zIndex(phase(of: workspace.id) == nil ? 0 : 1)
                             // Clicks in the name field while renaming position the cursor.
                             .gesture(
                                 DragGesture(minimumDistance: 0).onChanged { _ in beginDrag(workspace.id) },
                                 including: isRenaming ? .subviews : .all)
                             .contextMenu { menu(for: workspace) }
-                            .onDrop(
-                                of: [.ghosttyWorkspaceTab],
-                                delegate: TabDropDelegate(
-                                    workspace: workspace.id,
-                                    controller: controller,
-                                    target: $dropTarget))
+                            // A workspace from another window isn't this
+                            // sidebar's until dropped.
+                            .allowsHitTesting(workspace.id != model.incomingWorkspace?.id)
                     }
                 }
             }
@@ -86,6 +99,8 @@ private struct WorkspaceListView: View {
             .padding(.top, topInset)
         }
         .ignoresSafeArea(.container, edges: .top)
+        .coordinateSpace(name: Self.coordinateSpace)
+        .onDrop(of: [.ghosttyWorkspaceTab, .ghosttyWorkspace], delegate: self)
     }
 
     /// The workspace's context menu. It acts on the workspace, which it
@@ -119,6 +134,12 @@ private struct WorkspaceListView: View {
     // the model's `workspaceDrag`. The row is found by ID each time, since
     // workspaces can come and go during the drag (e.g. when a last terminal
     // exits).
+    //
+    // Dragging a row out of the sidebar sideways hands off to a system drag,
+    // which every window's sidebar accepts (see `WorkspaceDragOut`). Dragged
+    // back over the sidebar, the row rejoins it under the pointer until it's
+    // dropped or leaves again. Over another window's sidebar, it joins that
+    // sidebar the same way, after its rows.
 
     private func beginDrag(_ id: UUID) {
         // The gesture also reports every move; only the press begins a drag.
@@ -130,17 +151,30 @@ private struct WorkspaceListView: View {
             return
         }
 
-        model.workspaceDrag = .init(id: id)
+        model.workspaceDrag = Drag(id: id)
 
         let model = model
-        PressDragTracker.begin(from: press) { [weak model] _, translation in
-            guard let model else { return false }
+        let controller = controller
+        let host = Self.sidebarHost(at: press)
+        PressDragTracker.begin(from: press) { [weak model, weak host] event, translation in
+            guard let model, let source = controller.value else { return false }
             guard let from = model.workspaceIndex(of: id) else {
                 // The workspace is gone.
                 model.workspaceDrag = nil
                 return false
             }
-            model.workspaceDrag = .init(id: id, offset: Self.slots(of: model).clamped(translation.height, from: from))
+
+            // Pulled out of the sidebar sideways: drag it on as a system drag.
+            if let host, let sidebar = host.window?.convertToScreen(host.convert(host.bounds, to: nil)) {
+                let x = PressDragTracker.screenPoint(of: event).x
+                if x < sidebar.minX - Self.detachDistance || x > sidebar.maxX + Self.detachDistance {
+                    withAnimation(Self.slide) { model.workspaceDrag = Drag(id: id, phase: .draggingOut) }
+                    WorkspaceDragOut.begin(.workspace(id), of: source, from: host, with: event)
+                    return false
+                }
+            }
+
+            model.workspaceDrag = Drag(id: id, offset: Self.slots(of: model).clamped(translation.height, from: from))
             return true
         } released: { [weak model] translation in
             guard let model else { return }
@@ -157,50 +191,141 @@ private struct WorkspaceListView: View {
         }
     }
 
+    /// How far beside the sidebar the pointer can stray before the row is
+    /// dragged out of it.
+    private static let detachDistance: CGFloat = 16
+
+    /// The hosting view of the sidebar that was pressed.
+    private static func sidebarHost(at event: NSEvent) -> NSView? {
+        guard let frameView = event.window?.contentView?.superview,
+              let hit = frameView.hitTest(event.locationInWindow) else { return nil }
+        return sequence(first: hit, next: \.superview).first { $0 is NSHostingView<WorkspaceSidebarView> }
+    }
+
+    /// The workspaces, then a workspace being dragged in from another window.
+    private var displayedWorkspaces: [Workspace] {
+        model.workspaces + (model.incomingWorkspace.map { [$0] } ?? [])
+    }
+
     private static func slots(of model: WorkspaceModel) -> ReorderSlots {
-        ReorderSlots(count: model.workspaces.count, stride: rowHeight)
+        ReorderSlots(count: model.workspaces.count + (model.incomingWorkspace == nil ? 0 : 1), stride: rowHeight)
+    }
+
+    private func index(of id: UUID) -> Int? {
+        displayedWorkspaces.firstIndex { $0.id == id }
+    }
+
+    /// The drag phase of the workspace, if it's the one being dragged.
+    private func phase(of id: UUID) -> Drag.Phase? {
+        drag?.id == id ? drag?.phase : nil
     }
 
     /// How far the row is drawn from its slot during a drag.
     private func offset(at index: Int) -> CGFloat {
-        guard let drag, let from = model.workspaceIndex(of: drag.id) else { return 0 }
+        guard let drag, drag.phase != .draggingOut, let from = self.index(of: drag.id) else { return 0 }
         return Self.slots(of: model).offset(of: index, draggingFrom: from, by: drag.offset)
     }
 }
 
-/// Accepts a tab dragged out of a tab strip, this window's or another's,
-/// moving it to the row's workspace. Dropped on its own workspace, it goes
-/// back where it was.
-private struct TabDropDelegate: DropDelegate {
-    let workspace: UUID
-    let controller: Weak<TerminalController>
-    @Binding var target: UUID?
+// MARK: Dropping
 
+// Drops come from a tab dragged out of a tab strip, onto the workspace it
+// moves to, or from a workspace dragged out of a sidebar: this one's,
+// rejoining it, or another window's, joining it after its rows. A dragged
+// workspace follows the pointer until it's dropped or leaves.
+extension WorkspaceListView: DropDelegate {
     func validateDrop(info: DropInfo) -> Bool {
-        WorkspaceTabDragOut.dragged != nil
+        WorkspaceDragOut.draggedTab != nil
+            || (WorkspaceDragOut.draggedWorkspace != nil && drag?.phase != .settling)
     }
 
     func dropEntered(info: DropInfo) {
-        target = workspace
-    }
-
-    func dropExited(info: DropInfo) {
-        if target == workspace { target = nil }
+        follow(info)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+        follow(info)
+        let tabWithoutTarget = WorkspaceDragOut.draggedTab != nil && workspace(at: info.location) == nil
+        return DropProposal(operation: tabWithoutTarget ? .forbidden : .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        dropTarget = nil
+        guard let drag, drag.phase == .following else { return }
+        withAnimation(Self.slide) {
+            if model.incomingWorkspace?.id == drag.id {
+                model.incomingWorkspace = nil
+                model.workspaceDrag = nil
+            } else {
+                model.workspaceDrag = Drag(id: drag.id, phase: .draggingOut)
+            }
+        }
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        target = nil
-        guard let (tab, source) = WorkspaceTabDragOut.dragged, let controller = controller.value else { return false }
-        if source === controller {
-            controller.moveTab(tab, toWorkspace: workspace)
-        } else {
-            controller.receive(tab, from: source, inWorkspace: workspace)
+        dropTarget = nil
+        guard let controller = controller.value else { return false }
+
+        // A tab moves to the workspace it was dropped on. Dropped on its own
+        // workspace, it goes back where it was.
+        if let (tab, source) = WorkspaceDragOut.draggedTab {
+            guard let workspace = workspace(at: info.location) else { return false }
+            if source === controller {
+                controller.moveTab(tab, toWorkspace: workspace)
+            } else {
+                controller.receive(tab, from: source, inWorkspace: workspace)
+            }
+            return true
+        }
+
+        // A workspace settles into its slot, then moves there, unless this
+        // window, or the workspace's, went meanwhile.
+        guard let (id, source) = WorkspaceDragOut.draggedWorkspace,
+              let drag, drag.id == id,
+              let from = index(of: id) else { return false }
+        let to = Self.slots(of: model).destination(from: from, offset: drag.offset)
+        model.workspaceDrag = Drag(id: id, offset: CGFloat(to - from) * Self.rowHeight, phase: .settling)
+
+        let model = model
+        let destination = self.controller
+        WorkspaceDragOut.settle(.workspace(id), for: Self.slideDuration) { [weak source] in
+            guard let source else { return }
+            if source === destination.value {
+                model.moveWorkspace(id, to: to)
+            } else {
+                destination.value?.receive(workspace: id, from: source, at: to)
+            }
         }
         return true
+    }
+
+    /// Follows the drag: highlights the workspace a tab would be dropped on,
+    /// or shows a dragged workspace centered under the pointer. It joins the
+    /// sidebar, making room for itself, if it isn't in it already.
+    private func follow(_ info: DropInfo) {
+        if WorkspaceDragOut.draggedTab != nil {
+            dropTarget = workspace(at: info.location)
+            return
+        }
+
+        guard let (id, source) = WorkspaceDragOut.draggedWorkspace,
+              drag?.phase != .settling,
+              let controller = controller.value else { return }
+        withAnimation(drag?.phase == .following ? nil : Self.slide) {
+            if source !== controller, model.incomingWorkspace?.id != id {
+                model.incomingWorkspace = source.workspaceModel.workspaces.first { $0.id == id }
+            }
+            guard let from = index(of: id) else { return }
+            let slots = Self.slots(of: model)
+            let center = rowsTop + (CGFloat(from) + 0.5) * Self.rowHeight
+            model.workspaceDrag = Drag(id: id, offset: slots.clamped(info.location.y - center, from: from))
+        }
+    }
+
+    /// The workspace whose row is at `point`.
+    private func workspace(at point: CGPoint) -> UUID? {
+        let index = Int(((point.y - rowsTop) / Self.rowHeight).rounded(.down))
+        return model.workspaces.indices.contains(index) ? model.workspaces[index].id : nil
     }
 }
 

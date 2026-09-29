@@ -324,6 +324,26 @@ row follows the pointer and the rows it passes slide aside, as in the tab
 strip. As with tabs, pressing a row selects its workspace right away.
 Reordering affects display and workspace-navigation order only.
 
+### Moving workspaces between windows
+
+Pulling a row out of the sidebar sideways turns the drag into a system drag:
+the row leaves the sidebar and a preview card of the workspace follows the
+pointer. While it's dragged, every window shows its sidebar, a collapsed one
+over the terminal without resizing it. Over a sidebar, its own or another
+window's, the card gives way to the row itself, which joins the sidebar under
+the pointer while the rows it passes slide aside, and settles into its slot
+when dropped. The workspace moves there with its tabs, name and current tab,
+and the window comes to the front showing it. If it was the source window's
+last workspace, the source window closes, merging into the destination.
+
+Dropped outside every window, the workspace gets a new window there, or if
+it's its window's only workspace, the window moves there instead. Escape, or
+dropping anywhere else, returns the row to where it was. The terminal
+processes and split trees continue without restarting. Moving a workspace
+between windows isn't undoable, and it clears the source window's undo
+history. Workspaces aren't merged: dropped over another workspace's row, a
+workspace goes in beside it, and a tab strip doesn't take one.
+
 ### Moving tabs between workspaces
 
 A tab can be reassigned from one workspace to another within the same
@@ -544,6 +564,8 @@ Implemented:
   dragging them out of the strip onto the sidebar.
 - Dragging tabs between windows, onto another window's strip or sidebar, or
   out of every window into a new one.
+- Dragging workspaces between windows, onto another window's sidebar, or out
+  of every window into a new one.
 - Renaming tabs in place in the strip (`Command-R`), and workspaces in place
   in the sidebar (double-click, context menu, `Command-Shift-R`).
 - Closing workspaces from the context menu or the Workspace menu, with one
@@ -570,8 +592,7 @@ Implemented:
 
 Not yet implemented:
 
-- Dragging a tab that's alone in its workspace (its strip is hidden), and
-  dragging workspaces between windows.
+- Dragging a tab that's alone in its workspace (its strip is hidden).
 - Per-tab colors (the tab color is per window) and bell indicators in the tab
   strip.
 - `prompt_tab_title` targeted at a hidden terminal (it renames the shown tab);

@@ -518,16 +518,9 @@ extension TerminalController {
               let workspace = workspaceModel.workspace(of: tab) else { return false }
 
         release(tab)
-
-        undoManager?.disableUndoRegistration()
-        defer { undoManager?.enableUndoRegistration() }
-        let newController = TerminalController.newWindow(
-            ghostty,
-            tree: tab.surfaceTree,
-            position: position,
-            inheritBackgroundOpacity: isBackgroundOpaque)
-        let newWorkspace = Workspace(id: UUID(), customName: workspace.customName, tabs: [tab], selectedTabID: tab.id)
-        newController.adoptWorkspaces([newWorkspace], selectedWorkspaceID: newWorkspace.id)
+        openWindow(
+            with: Workspace(id: UUID(), customName: workspace.customName, tabs: [tab], selectedTabID: tab.id),
+            position: position)
         return true
     }
 
@@ -568,6 +561,68 @@ extension TerminalController {
             return
         }
         detach(tab)
+    }
+
+    /// Moves a workspace, with its tabs, into a new window of its own, with
+    /// its top left corner at `position`. Its tabs stay the same, with their
+    /// terminals, focus and titles. Returns false if it's the window's only
+    /// workspace. Like moving a tab into a new window, this can't be undone.
+    @discardableResult
+    func moveWorkspaceToNewWindow(_ id: UUID, position: NSPoint? = nil) -> Bool {
+        guard workspaceModel.workspaces.count > 1,
+              let workspace = workspaceModel.workspaces.first(where: { $0.id == id }) else { return false }
+
+        release(workspace: id)
+        openWindow(with: workspace, position: position)
+        return true
+    }
+
+    /// Opens a new window with a workspace released from this one, showing
+    /// its current tab, with its top left corner at `position` if given.
+    private func openWindow(with workspace: Workspace, position: NSPoint?) {
+        guard let tab = workspace.selectedTab else { return }
+        undoManager?.disableUndoRegistration()
+        defer { undoManager?.enableUndoRegistration() }
+        let newController = TerminalController.newWindow(
+            ghostty,
+            tree: tab.surfaceTree,
+            position: position,
+            inheritBackgroundOpacity: isBackgroundOpaque)
+        newController.adoptWorkspaces([workspace], selectedWorkspaceID: workspace.id)
+    }
+
+    /// Moves a workspace, with its tabs, here from another window, to
+    /// `index`, and shows it. Its tabs stay the same, with their terminals,
+    /// focus and titles. If it was the other window's last workspace, that
+    /// window closes. Like moving a tab between windows, this can't be
+    /// undone.
+    func receive(workspace id: UUID, from source: TerminalController, at index: Int) {
+        guard source !== self,
+              let workspace = source.workspaceModel.workspaces.first(where: { $0.id == id }) else { return }
+
+        source.release(workspace: id)
+        workspaceModel.insert(workspace, at: index)
+        selectWorkspace(id)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Takes a workspace out of the window to move it to another. If it's
+    /// the shown workspace, the next workspace (else the previous one) is
+    /// shown. The window's last workspace closes the window, without closing
+    /// its terminals or registering an undo. The window's undo history is
+    /// cleared, as when releasing a tab.
+    private func release(workspace id: UUID) {
+        guard let index = workspaceModel.workspaceIndex(of: id) else { return }
+        undoManager?.removeAllActions(withTarget: self)
+        guard let neighbor = workspaceModel.neighborOfWorkspace(at: index) else {
+            workspaceModel.removeWorkspace(id)
+            // An empty tree closes the window.
+            surfaceTree = .init()
+            return
+        }
+
+        if workspaceModel.selectedWorkspaceID == id { selectWorkspace(neighbor.id) }
+        workspaceModel.removeWorkspace(id)
     }
 
     /// Takes over workspaces from elsewhere (a closed window being restored

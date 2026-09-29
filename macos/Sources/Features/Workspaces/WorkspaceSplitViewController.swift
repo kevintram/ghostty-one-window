@@ -13,6 +13,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
     private weak var controller: TerminalController?
     private let model: WorkspaceModel
     private var tabStripVisibility: AnyCancellable?
+    private var dropSidebarVisibility: AnyCancellable?
     private var sidebarCollapse: AnyCancellable?
     private let sidebarInsets = WorkspaceSidebarInsets()
 
@@ -93,7 +94,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             workspaces.first { $0.id == selectedID }?.tabs.count ?? 0
         }
         tabStripVisibility = tabCount
-            .combineLatest(model.$renaming, model.$incomingTab.map { $0 != nil }, WorkspaceTabDragOut.isDragging)
+            .combineLatest(model.$renaming, model.$incomingTab.map { $0 != nil }, WorkspaceDragOut.dragging.map { $0 == .tab })
             .map { (tabs: Int, renaming: WorkspaceModel.Renaming?, incoming: Bool, dragging: Bool) in
                 let reserves = WorkspaceModel.reservesTabStrip(tabCount: tabs, renaming: renaming)
                 return TabStripLayout(reserves: reserves, visible: reserves || incoming || dragging)
@@ -122,7 +123,54 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             terminalContainer.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
             terminalContainer.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
         ])
+        addDropSidebar(to: detail.view)
         addSplitViewItem(NSSplitViewItem(viewController: detail))
+    }
+
+    /// Adds the sidebar shown in place of a collapsed one while a workspace
+    /// is dragged, in any window, to take the drop: over the terminal rather
+    /// than resizing it, and until a workspace dropped on it settles.
+    ///
+    /// Its list only exists while it's shown. Otherwise it would duplicate
+    /// the real sidebar's, rename fields included, whose removal saves them.
+    private func addDropSidebar(to view: NSView) {
+        let dropSidebar = NSVisualEffectView()
+        dropSidebar.material = .sidebar
+        dropSidebar.blendingMode = .withinWindow
+        dropSidebar.translatesAutoresizingMaskIntoConstraints = false
+        dropSidebar.isHidden = true
+        view.addSubview(dropSidebar)
+
+        NSLayoutConstraint.activate([
+            dropSidebar.topAnchor.constraint(equalTo: view.topAnchor),
+            dropSidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            dropSidebar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            dropSidebar.widthAnchor.constraint(equalToConstant: WorkspaceModel.sidebarWidth),
+        ])
+
+        dropSidebarVisibility = model.$isSidebarCollapsed
+            .combineLatest(
+                WorkspaceDragOut.dragging.map { $0 == .workspace },
+                model.$incomingWorkspace.map { $0 != nil })
+            .map { collapsed, dragging, incoming in collapsed && (dragging || incoming) }
+            .removeDuplicates()
+            .sink { [weak self, weak dropSidebar] visible in
+                MainActor.assumeIsolated {
+                    guard let self, let dropSidebar else { return }
+                    dropSidebar.subviews.forEach { $0.removeFromSuperview() }
+                    dropSidebar.isHidden = !visible
+                    guard visible else { return }
+
+                    let list = NSHostingView(rootView: WorkspaceSidebarView(
+                        model: self.model,
+                        controller: .init(self.controller),
+                        insets: self.sidebarInsets))
+                    list.sizingOptions = []
+                    list.frame = dropSidebar.bounds
+                    list.autoresizingMask = [.width, .height]
+                    dropSidebar.addSubview(list)
+                }
+            }
     }
 
     // MARK: Sidebar

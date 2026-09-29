@@ -17,7 +17,7 @@ private struct TabStrip: View {
     @ObservedObject var model: WorkspaceModel
     let controller: Weak<TerminalController>
 
-    private typealias Drag = WorkspaceModel.TabDrag
+    private typealias Drag = WorkspaceModel.ReorderDrag
 
     private var drag: Drag? { model.tabDrag }
 
@@ -170,7 +170,7 @@ private struct TabStrip: View {
     //
     // Dragging a tab out of the strip hands off to a system drag, which the
     // sidebar's workspace rows and every window's strip accept (see
-    // `WorkspaceTabDragOut`). Dragged back over the strip, the tab rejoins it
+    // `WorkspaceDragOut`). Dragged back over the strip, the tab rejoins it
     // under the pointer until it's dropped or leaves again. Over another
     // window's strip, it joins that strip the same way, after its tabs.
 
@@ -207,7 +207,7 @@ private struct TabStrip: View {
             if let host, let strip = host.window?.convertToScreen(host.convert(host.bounds, to: nil)),
                !strip.insetBy(dx: 0, dy: -Self.detachDistance).contains(PressDragTracker.screenPoint(of: event)) {
                 withAnimation(Self.slide) { model.tabDrag = Drag(id: tab.id, phase: .draggingOut) }
-                WorkspaceTabDragOut.begin(tab, of: source, from: host, with: event)
+                WorkspaceDragOut.begin(.tab(tab), of: source, from: host, with: event)
                 return false
             }
 
@@ -229,9 +229,7 @@ private struct TabStrip: View {
     }
 
     /// Settles the dragged tab into slot `to`, then moves it there with
-    /// `move` and ends its drag. By then the strip already looks like the
-    /// new order and nothing needs to animate. If `move` doesn't move it,
-    /// the tab shows where it still is.
+    /// `move` (see `WorkspaceDragOut.settle`).
     private static func settle(
         _ tab: TerminalTab,
         from: Int,
@@ -241,14 +239,7 @@ private struct TabStrip: View {
         move: @escaping () -> Void
     ) {
         model.tabDrag = Drag(id: tab.id, offset: CGFloat(to - from) * stride, phase: .settling)
-        DispatchQueue.main.asyncAfter(deadline: .now() + slideDuration) {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                move()
-                WorkspaceTabDragOut.letGo(tab)
-            }
-        }
+        WorkspaceDragOut.settle(.tab(tab), for: slideDuration, move: move)
     }
 
     /// How far above or below the strip the pointer can stray before the
@@ -293,7 +284,7 @@ private struct TabStrip: View {
 // the pointer until it's dropped or leaves.
 extension TabStrip: DropDelegate {
     func validateDrop(info: DropInfo) -> Bool {
-        WorkspaceTabDragOut.dragged != nil && drag?.phase != .settling
+        WorkspaceDragOut.draggedTab != nil && drag?.phase != .settling
     }
 
     func dropEntered(info: DropInfo) {
@@ -331,7 +322,7 @@ extension TabStrip: DropDelegate {
         // dropped on, unless this window, that workspace, or the tab's window
         // went meanwhile.
         let destination = controller
-        let source = WorkspaceTabDragOut.dragged?.source
+        let source = WorkspaceDragOut.draggedTab?.source
         let workspace = model.selectedWorkspaceID
         Self.settle(tab, from: from, to: to, stride: slots.stride, in: model) { [weak source] in
             guard let source, let workspace else { return }
@@ -343,7 +334,7 @@ extension TabStrip: DropDelegate {
     /// Shows the dragged tab in the strip, centered under the pointer. It
     /// joins the strip, making room for itself, if it isn't in it already.
     private func follow(_ info: DropInfo) {
-        guard let tab = WorkspaceTabDragOut.dragged?.tab, drag?.phase != .settling else { return }
+        guard let tab = WorkspaceDragOut.draggedTab?.tab, drag?.phase != .settling else { return }
         withAnimation(drag?.phase == .following ? nil : Self.slide) {
             if !model.contains(tab) { model.incomingTab = tab }
             guard let from = index(of: tab.id) else { return }

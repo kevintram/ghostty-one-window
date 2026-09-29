@@ -116,17 +116,18 @@ final class WorkspaceModel: ObservableObject {
 
     @Published var renaming: Renaming?
 
-    /// A tab being dragged in the tab strip, and how far it's been dragged.
-    struct TabDrag: Equatable {
+    /// An item being dragged to reorder it, a tab in the tab strip or a
+    /// workspace in the sidebar, and how far it's been dragged.
+    struct ReorderDrag: Equatable {
         enum Phase {
-            /// Following the pointer within the strip.
+            /// Following the pointer within the strip or sidebar.
             case following
 
-            /// Released and animating into its slot, before the tab moves.
+            /// Dropped and animating into its slot, before it moves there.
             case settling
 
-            /// Dragged out of the strip as a system drag, to be dropped on a
-            /// workspace in the sidebar.
+            /// Dragged out of the strip or sidebar as a system drag (see
+            /// `WorkspaceDragOut`).
             case draggingOut
         }
 
@@ -135,21 +136,19 @@ final class WorkspaceModel: ObservableObject {
         var phase = Phase.following
     }
 
-    @Published var tabDrag: TabDrag?
+    @Published var tabDrag: ReorderDrag?
 
     /// A tab of another window dragged over the tab strip, which shows it
     /// after its own tabs, following the pointer (as `tabDrag`), until it's
     /// dropped there or leaves.
     @Published var incomingTab: TerminalTab?
 
-    /// A workspace being dragged in the sidebar, and how far it's been
-    /// dragged.
-    struct WorkspaceDrag: Equatable {
-        let id: UUID
-        var offset: CGFloat = 0
-    }
+    @Published var workspaceDrag: ReorderDrag?
 
-    @Published var workspaceDrag: WorkspaceDrag?
+    /// A workspace of another window dragged over the sidebar, which shows
+    /// it after its own workspaces, following the pointer (as
+    /// `workspaceDrag`), until it's dropped there or leaves.
+    @Published var incomingWorkspace: Workspace?
 
     /// The fixed width of the workspace sidebar.
     static let sidebarWidth: CGFloat = 200
@@ -232,10 +231,6 @@ final class WorkspaceModel: ObservableObject {
         location(of: tab) != nil
     }
 
-    func tab(id: UUID) -> TerminalTab? {
-        allTabs.first { $0.id == id }
-    }
-
     /// The tab whose split tree holds the surface.
     func tab(owning surface: Ghostty.SurfaceView) -> TerminalTab? {
         allTabs.first { $0.surfaceTree.contains(surface) }
@@ -250,6 +245,24 @@ final class WorkspaceModel: ObservableObject {
         let workspace = Workspace(id: id, customName: customName, tabs: [])
         workspaces.insert(workspace, at: min(index ?? workspaces.endIndex, workspaces.endIndex))
         return id
+    }
+
+    /// Inserts a workspace, with its tabs, at `index`.
+    func insert(_ workspace: Workspace, at index: Int) {
+        workspaces.insert(workspace, at: min(max(index, 0), workspaces.endIndex))
+    }
+
+    /// Removes a workspace with its tabs. It mustn't be the selected one;
+    /// select another first.
+    func removeWorkspace(_ id: UUID) {
+        guard let index = workspaceIndex(of: id) else { return }
+        let workspace = workspaces.remove(at: index)
+        switch renaming {
+        case .workspace(id): renaming = nil
+        case .tab(let tab) where workspace.tabs.contains(where: { $0.id == tab }): renaming = nil
+        default: break
+        }
+        if workspaceDrag?.id == id { workspaceDrag = nil }
     }
 
     /// Inserts a tab in a workspace, at the end unless `index` is given.
