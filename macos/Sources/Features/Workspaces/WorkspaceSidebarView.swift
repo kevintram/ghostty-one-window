@@ -10,8 +10,17 @@ struct WorkspaceSidebarView: View {
 
     @ObservedObject var insets: WorkspaceSidebarInsets
 
+    /// How much the window's background color covers the translucent window
+    /// behind the sidebar, so its text stays readable over busy content.
+    private static let backgroundOpacity = 0.5
+
     var body: some View {
         WorkspaceListView(model: model, controller: controller, topInset: insets.top)
+            .background {
+                Color(nsColor: .windowBackgroundColor)
+                    .opacity(Self.backgroundOpacity)
+                    .ignoresSafeArea()
+            }
     }
 }
 
