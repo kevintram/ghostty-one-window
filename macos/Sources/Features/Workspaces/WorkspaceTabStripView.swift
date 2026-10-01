@@ -36,9 +36,12 @@ private struct TabStrip: View {
         let close = UUID()
     }
 
-    private static let spacing: CGFloat = 4
+    private static let spacing: CGFloat = 2
     private static let inset = (WorkspaceModel.tabStripHeight - 24) / 2
     private static let newTabWidth: CGFloat = 24
+    /// The new tab button's gap from the last tab, matching its gap from
+    /// the strip's edge so it sits evenly between them.
+    private static let newTabGap = inset
     private static let holdDuration: Duration = .seconds(1)
     private static let slideDuration = 0.15
     private static let slide = Animation.easeOut(duration: slideDuration)
@@ -85,6 +88,7 @@ private struct TabStrip: View {
             }
             .buttonStyle(HoverCircleButtonStyle())
             .help("New Tab")
+            .padding(.leading, Self.newTabGap - Self.spacing)
         }
         // Match the vertical inset: 24pt tabs centered in the strip's height.
         .padding(.horizontal, Self.inset)
@@ -134,7 +138,7 @@ private struct TabStrip: View {
     /// dragged out the strip holds one fewer.
     private func tabWidths(count: Int, includingSelected: Bool) -> (selected: CGFloat, other: CGFloat) {
         guard count > 0 else { return (0, 0) }
-        let available = max(width - 2 * Self.inset - Self.newTabWidth - CGFloat(count) * Self.spacing, 0)
+        let available = max(width - 2 * Self.inset - Self.newTabGap - Self.newTabWidth - CGFloat(count - 1) * Self.spacing, 0)
         let share = available / CGFloat(count)
         guard includingSelected, count > 1, share < TabButton.selectedMinWidth else { return (share, share) }
 
