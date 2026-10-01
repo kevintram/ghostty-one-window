@@ -385,6 +385,7 @@ private struct WorkspaceRow: View {
         }
         .contentShape(Rectangle())
         .onMiddleClick { close() }
+        .hoverTooltip(name)
         // One button for VoiceOver, except while renaming, when the name
         // field must stay reachable.
         .accessibilityElement(children: isRenaming ? .contain : .combine)

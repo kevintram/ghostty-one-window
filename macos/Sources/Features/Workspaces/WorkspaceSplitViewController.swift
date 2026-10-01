@@ -24,6 +24,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
     private var workspaceSwitcherEventMonitor: Any?
     private var workspaceSwitcherModifiers: NSEvent.ModifierFlags = []
     private let sidebarInsets = WorkspaceSidebarInsets()
+    private let tooltip = HoverTooltipCoordinator()
 
     /// Whether the sidebar's collapsed state has been applied yet. The first
     /// time isn't animated.
@@ -68,7 +69,11 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         splitView.dividerStyle = .thin
 
         let sidebarController = NSHostingController(
-            rootView: WorkspaceSidebarView(model: model, controller: .init(controller), insets: sidebarInsets))
+            rootView: WorkspaceSidebarView(
+                model: model,
+                controller: .init(controller),
+                insets: sidebarInsets)
+                .coordinatedHoverTooltips(using: tooltip))
         // Don't let SwiftUI's ideal size drive the window size.
         sidebarController.sizingOptions = []
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController)
@@ -104,7 +109,10 @@ final class WorkspaceSplitViewController: NSSplitViewController {
 
         // Added after the terminal so it draws above the terminal's glass
         // background, which extends up under the titlebar.
-        let tabStrip = NSHostingView(rootView: WorkspaceTabStripView(model: model, controller: .init(controller)))
+        let tabStrip = NSHostingView(rootView: WorkspaceTabStripView(
+            model: model,
+            controller: .init(controller))
+            .coordinatedHoverTooltips(using: tooltip))
         tabStrip.sizingOptions = []
         tabStrip.translatesAutoresizingMaskIntoConstraints = false
         detail.view.addSubview(tabStrip)
@@ -243,7 +251,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
                     let list = NSHostingView(rootView: WorkspaceSidebarView(
                         model: self.model,
                         controller: .init(self.controller),
-                        insets: self.sidebarInsets))
+                        insets: self.sidebarInsets)
+                        .coordinatedHoverTooltips(using: self.tooltip))
                     list.sizingOptions = []
                     list.frame = dropSidebar.bounds
                     list.autoresizingMask = [.width, .height]
@@ -337,7 +346,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             },
             toggleSidebar: { [weak self] in
                 self?.toggleSidebar(nil)
-            }))
+            })
+            .coordinatedHoverTooltips(using: tooltip))
         controls.frame = NSRect(x: 0, y: 0, width: 72, height: 28)
 
         let accessory = NSTitlebarAccessoryViewController()
@@ -360,8 +370,10 @@ private struct SidebarControls: View {
     var body: some View {
         glass(HStack(spacing: 0) {
             button("rectangle.stack.badge.plus", action: newWorkspace)
-                .help("New workspace")
-            SidebarToggle(model: model, button: button("sidebar.left", action: toggleSidebar))
+                .hoverTooltip("New workspace")
+            SidebarToggle(
+                model: model,
+                button: button("sidebar.left", action: toggleSidebar))
         })
         .padding(.leading, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -397,7 +409,7 @@ private struct SidebarToggle<Button: View>: View {
     let button: Button
 
     var body: some View {
-        button.help(model.isSidebarCollapsed ? "Show sidebar" : "Hide sidebar")
+        button.hoverTooltip(model.isSidebarCollapsed ? "Show sidebar" : "Hide sidebar")
     }
 }
 

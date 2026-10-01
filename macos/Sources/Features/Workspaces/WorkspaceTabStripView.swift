@@ -95,7 +95,7 @@ private struct TabStrip: View {
                     .frame(width: Self.newTabWidth, height: 24)
             }
             .buttonStyle(HoverCircleButtonStyle())
-            .help("New Tab")
+            .hoverTooltip("New Tab")
         }
         // Match the vertical inset: 24pt tabs centered in the strip's height.
         // The first tab starts at the strip's edge instead and keeps that
@@ -440,7 +440,7 @@ private struct TabButton: View {
             .onMiddleClick { close(true) }
             .onHover { hovering = $0 }
             // The full title, which narrow tabs cut short or leave out.
-            .help(title)
+            .hoverTooltip(title)
             // One button for VoiceOver, except while renaming, when the title
             // field must stay reachable.
             .accessibilityElement(children: isRenaming ? .contain : .combine)
@@ -578,7 +578,7 @@ private struct TabButton: View {
                 .frame(width: Self.closeCircleSize, height: Self.closeCircleSize)
         }
         .buttonStyle(HoverCircleButtonStyle())
-        .help("Close Tab")
+        .hoverTooltip("Close Tab")
         // Laid out as just the glyph, so the × sits flush with the tab's edge
         // and its circle extends past it.
         .padding(-Self.closeCircleOverhang)
