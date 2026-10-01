@@ -72,8 +72,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             rootView: WorkspaceSidebarView(
                 model: model,
                 controller: .init(controller),
-                insets: sidebarInsets)
-                .coordinatedHoverTooltips(using: tooltip))
+                insets: sidebarInsets,
+                tooltip: tooltip))
         // Don't let SwiftUI's ideal size drive the window size.
         sidebarController.sizingOptions = []
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController)
@@ -111,8 +111,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         // background, which extends up under the titlebar.
         let tabStrip = NSHostingView(rootView: WorkspaceTabStripView(
             model: model,
-            controller: .init(controller))
-            .coordinatedHoverTooltips(using: tooltip))
+            controller: .init(controller),
+            tooltip: tooltip))
         tabStrip.sizingOptions = []
         tabStrip.translatesAutoresizingMaskIntoConstraints = false
         detail.view.addSubview(tabStrip)
@@ -251,8 +251,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
                     let list = NSHostingView(rootView: WorkspaceSidebarView(
                         model: self.model,
                         controller: .init(self.controller),
-                        insets: self.sidebarInsets)
-                        .coordinatedHoverTooltips(using: self.tooltip))
+                        insets: self.sidebarInsets,
+                        tooltip: self.tooltip))
                     list.sizingOptions = []
                     list.frame = dropSidebar.bounds
                     list.autoresizingMask = [.width, .height]

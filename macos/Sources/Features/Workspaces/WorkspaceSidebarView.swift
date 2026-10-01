@@ -9,13 +9,16 @@ struct WorkspaceSidebarView: View {
     let controller: Weak<TerminalController>
 
     @ObservedObject var insets: WorkspaceSidebarInsets
+    let tooltip: HoverTooltipCoordinator
 
     /// How much the window's background color covers the translucent window
     /// behind the sidebar, so its text stays readable over busy content.
     private static let backgroundOpacity = 0.5
 
     var body: some View {
+        // Keep the hosting root unmodified: drag-out lookup uses this view type.
         WorkspaceListView(model: model, controller: controller, topInset: insets.top)
+            .coordinatedHoverTooltips(using: tooltip)
             .background {
                 Color(nsColor: .windowBackgroundColor)
                     .opacity(Self.backgroundOpacity)

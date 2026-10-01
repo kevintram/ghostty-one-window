@@ -7,9 +7,12 @@ struct WorkspaceTabStripView: View {
     /// Performs the strip's actions. Weak, since the controller owns the
     /// window this is in.
     let controller: Weak<TerminalController>
+    let tooltip: HoverTooltipCoordinator
 
     var body: some View {
+        // Keep the hosting root unmodified: drag-out lookup uses this view type.
         TabStrip(model: model, controller: controller)
+            .coordinatedHoverTooltips(using: tooltip)
     }
 }
 
