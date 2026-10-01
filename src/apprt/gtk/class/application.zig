@@ -815,6 +815,7 @@ pub const Application = extern struct {
             .close_workspace,
             .rename_workspace,
             .goto_workspace,
+            .workspace_switcher,
             .move_workspace,
             .move_tab_to_workspace,
             .toggle_sidebar,

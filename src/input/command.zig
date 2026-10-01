@@ -785,6 +785,7 @@ fn actionCommands(action: Action.Key) []const Command {
         .write_scrollback_file,
         .goto_tab,
         .goto_workspace,
+        .workspace_switcher,
         .resize_split,
         .activate_key_table,
         .activate_key_table_once,

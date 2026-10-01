@@ -377,6 +377,9 @@ pub const Action = union(Key) {
     /// the scenario that the workspace value is invalid.
     goto_workspace: GotoTab,
 
+    /// Cycle through workspaces in most-recently-used order.
+    workspace_switcher: WorkspaceSwitcher,
+
     /// Move the target's workspace by a relative offset, wrapping around.
     move_workspace: MoveTab,
 
@@ -466,6 +469,7 @@ pub const Action = union(Key) {
         close_workspace,
         rename_workspace,
         goto_workspace,
+        workspace_switcher,
         move_workspace,
         move_tab_to_workspace,
         toggle_sidebar,
@@ -618,6 +622,19 @@ pub const GotoTab = enum(c_int) {
     // test "ghostty.h GotoTab" {
     //     try lib.checkGhosttyHEnum(GotoTab, "GHOSTTY_GOTO_TAB_");
     // }
+};
+
+/// Direction to move through the most-recently-used workspace switcher.
+pub const WorkspaceSwitcher = enum(c_int) {
+    previous,
+    next,
+
+    test "ghostty.h WorkspaceSwitcher" {
+        try lib.checkGhosttyHEnum(
+            WorkspaceSwitcher,
+            "GHOSTTY_WORKSPACE_SWITCHER_",
+        );
+    }
 };
 
 /// The fullscreen mode to toggle to if we're moving to fullscreen.

@@ -2,6 +2,11 @@ import AppKit
 import Combine
 import SwiftUI
 
+/// A full-window SwiftUI overlay that remains transparent to pointer input.
+private final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// The content of a terminal window: a full-height workspace sidebar beside
 /// a column with the workspace tab strip above the terminal.
 ///
@@ -15,6 +20,9 @@ final class WorkspaceSplitViewController: NSSplitViewController {
     private var tabStripVisibility: AnyCancellable?
     private var dropSidebarVisibility: AnyCancellable?
     private var sidebarCollapse: AnyCancellable?
+    private var workspaceSwitcherDeactivation: AnyCancellable?
+    private var workspaceSwitcherEventMonitor: Any?
+    private var workspaceSwitcherModifiers: NSEvent.ModifierFlags = []
     private let sidebarInsets = WorkspaceSidebarInsets()
 
     /// Whether the sidebar's collapsed state has been applied yet. The first
@@ -35,11 +43,22 @@ final class WorkspaceSplitViewController: NSSplitViewController {
 
         self.splitView = WorkspaceSplitView()
         setupItems()
+        workspaceSwitcherEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.flagsChanged, .keyDown]
+        ) { [weak self] event in
+            self?.handleWorkspaceSwitcherEvent(event) ?? event
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        if let workspaceSwitcherEventMonitor {
+            NSEvent.removeMonitor(workspaceSwitcherEventMonitor)
+        }
     }
 
     /// Items are added before the view loads; NSSplitViewController's own
@@ -129,7 +148,62 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             terminalContainer.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
         ])
         addDropSidebar(to: detail.view)
+
+        // The keyboard-driven workspace switcher floats above the detail
+        // column without taking focus or affecting terminal layout.
+        let switcher = PassthroughHostingView(rootView: WorkspaceSwitcherView(model: model))
+        switcher.sizingOptions = []
+        switcher.translatesAutoresizingMaskIntoConstraints = false
+        detail.view.addSubview(switcher)
+        NSLayoutConstraint.activate([
+            switcher.topAnchor.constraint(equalTo: detail.view.topAnchor),
+            switcher.leadingAnchor.constraint(equalTo: detail.view.leadingAnchor),
+            switcher.bottomAnchor.constraint(equalTo: detail.view.bottomAnchor),
+            switcher.trailingAnchor.constraint(equalTo: detail.view.trailingAnchor),
+        ])
+
         addSplitViewItem(NSSplitViewItem(viewController: detail))
+    }
+
+    /// Starts tracking the non-Shift modifier that opened the switcher. If
+    /// the action wasn't invoked by a modified key event, it acts as a
+    /// one-step MRU switch instead of leaving an interaction with no way to
+    /// commit it.
+    func workspaceSwitcherDidCycle(isStarting: Bool) {
+        guard isStarting else { return }
+
+        let flags = (NSApp.currentEvent?.modifierFlags ?? NSEvent.modifierFlags)
+            .intersection(.deviceIndependentFlagsMask)
+        workspaceSwitcherModifiers = flags.intersection([.control, .command, .option])
+
+        if workspaceSwitcherModifiers.isEmpty {
+            finishWorkspaceSwitcher(commit: true)
+        }
+    }
+
+    /// Commits when the opening modifier is released, and lets Escape cancel
+    /// without changing workspaces, matching the system application switcher.
+    private func handleWorkspaceSwitcherEvent(_ event: NSEvent) -> NSEvent? {
+        guard model.workspaceSwitcher != nil,
+              !workspaceSwitcherModifiers.isEmpty else { return event }
+
+        switch event.type {
+        case .flagsChanged where event.modifierFlags.isDisjoint(with: workspaceSwitcherModifiers):
+            finishWorkspaceSwitcher(commit: true)
+
+        case .keyDown where event.keyCode == 0x35: // Escape
+            finishWorkspaceSwitcher(commit: false)
+            return nil
+
+        default:
+            break
+        }
+        return event
+    }
+
+    private func finishWorkspaceSwitcher(commit: Bool) {
+        workspaceSwitcherModifiers = []
+        controller?.finishWorkspaceSwitcher(commit: commit)
     }
 
     /// Adds the sidebar shown in place of a collapsed one while a workspace
@@ -206,6 +280,16 @@ final class WorkspaceSplitViewController: NSSplitViewController {
     override func viewWillAppear() {
         super.viewWillAppear()
         installSidebarControls()
+
+        workspaceSwitcherDeactivation = view.window.map { window in
+            NotificationCenter.default
+            .publisher(for: NSWindow.didResignKeyNotification, object: window)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.finishWorkspaceSwitcher(commit: false)
+                }
+            }
+        }
     }
 
     /// The standard action (View menu, ⌘B, the titlebar button) toggles the

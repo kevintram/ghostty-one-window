@@ -658,6 +658,20 @@ extension Ghostty {
                     }
                 }
 
+            case GHOSTTY_ACTION_WORKSPACE_SWITCHER:
+                let direction = action.action.workspace_switcher
+                return performWorkspaceAction(target: target, name: "workspace switcher") { controller in
+                    switch direction {
+                    case GHOSTTY_WORKSPACE_SWITCHER_PREVIOUS:
+                        return controller.cycleWorkspaceSwitcher(offset: 1)
+                    case GHOSTTY_WORKSPACE_SWITCHER_NEXT:
+                        return controller.cycleWorkspaceSwitcher(offset: -1)
+                    default:
+                        assertionFailure()
+                        return false
+                    }
+                }
+
             case GHOSTTY_ACTION_MOVE_WORKSPACE:
                 let amount = action.action.move_workspace.amount
                 return performWorkspaceAction(target: target, name: "move workspace") {

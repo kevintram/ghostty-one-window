@@ -90,6 +90,27 @@ extension TerminalController {
         return true
     }
 
+    /// Opens or advances the window-local most-recently-used workspace
+    /// switcher. Its split view owns the keyboard interaction and commit.
+    @discardableResult
+    func cycleWorkspaceSwitcher(offset: Int) -> Bool {
+        let isStarting = workspaceModel.workspaceSwitcher == nil
+        guard workspaceModel.cycleWorkspaceSwitcher(offset: offset) else { return false }
+
+        guard let splitView = window?.contentViewController as? WorkspaceSplitViewController else {
+            finishWorkspaceSwitcher(commit: true)
+            return true
+        }
+        splitView.workspaceSwitcherDidCycle(isStarting: isStarting)
+        return true
+    }
+
+    /// Dismisses the workspace switcher, optionally selecting its highlight.
+    func finishWorkspaceSwitcher(commit: Bool) {
+        guard let id = workspaceModel.finishWorkspaceSwitcher(commit: commit) else { return }
+        selectWorkspace(id)
+    }
+
     /// The index of the workspace `offset` positions from the selected one,
     /// wrapping around, or nil if there's no other workspace.
     private func adjacentWorkspaceIndex(offset: Int) -> Int? {

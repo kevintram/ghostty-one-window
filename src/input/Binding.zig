@@ -637,6 +637,15 @@ pub const Action = union(enum) {
     /// Only supported on macOS, in windows that have workspaces.
     goto_workspace: usize,
 
+    /// Cycle through workspaces in most-recently-used order. The switcher
+    /// stays open until the shortcut's Control, Command, or Option modifier
+    /// is released. Without one of those modifiers, it switches immediately.
+    ///
+    /// Valid values: `previous`, `next`.
+    ///
+    /// Only supported on macOS, in windows that have workspaces.
+    workspace_switcher: WorkspaceSwitcher,
+
     /// Moves the current workspace by a relative offset in the sidebar,
     /// wrapping around cyclically like `move_tab`.
     ///
@@ -1102,6 +1111,11 @@ pub const Action = union(enum) {
         next,
     };
 
+    pub const WorkspaceSwitcher = enum {
+        previous,
+        next,
+    };
+
     pub const AdjustSelection = enum {
         left,
         right,
@@ -1525,6 +1539,7 @@ pub const Action = union(enum) {
             .next_workspace,
             .last_workspace,
             .goto_workspace,
+            .workspace_switcher,
             .move_workspace,
             .move_tab_to_workspace,
             .toggle_sidebar,
@@ -3468,11 +3483,15 @@ test "parse: action with string" {
 test "parse: action with enum" {
     const testing = std.testing;
 
-    // parameter
     {
         const binding = try parseSingle("a=new_split:right");
         try testing.expect(binding.action == .new_split);
         try testing.expectEqual(Action.SplitDirection.right, binding.action.new_split);
+    }
+    {
+        const binding = try parseSingle("a=workspace_switcher:previous");
+        try testing.expect(binding.action == .workspace_switcher);
+        try testing.expectEqual(Action.WorkspaceSwitcher.previous, binding.action.workspace_switcher);
     }
 }
 

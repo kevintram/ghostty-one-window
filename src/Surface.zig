@@ -5453,6 +5453,15 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             },
         ),
 
+        .workspace_switcher => |direction| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .workspace_switcher,
+            switch (direction) {
+                .previous => .previous,
+                .next => .next,
+            },
+        ),
+
         .move_workspace => |position| return try self.rt_app.performAction(
             .{ .surface = self },
             .move_workspace,

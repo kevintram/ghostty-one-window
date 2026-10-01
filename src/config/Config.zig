@@ -7233,6 +7233,16 @@ pub const Keybinds = struct {
                 .{ .key = .{ .unicode = 'b' }, .mods = .{ .super = true } },
                 .{ .toggle_sidebar = {} },
             );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .physical = .backquote }, .mods = .{ .ctrl = true } },
+                .{ .workspace_switcher = .previous },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .physical = .backquote }, .mods = .{ .ctrl = true, .shift = true } },
+                .{ .workspace_switcher = .next },
+            );
             {
                 // Like Cmd+1-8 and Cmd+9 for tabs, both the physical and
                 // the unicode digit keys, for layouts whose digit keys don't
