@@ -197,6 +197,10 @@ which joins the strip under the pointer while the tabs it passes slide aside,
 and settles into its slot when dropped. Escape, or dropping anywhere else,
 returns the tab to where it was.
 
+Middle-clicking a tab or workspace row closes it without selecting it first,
+using the same confirmation and undo behavior as the corresponding close
+button or menu item.
+
 Selecting a tab swaps its split tree into the window (see 10.3). Ghostty's
 tab navigation — `goto_tab` (index, next, previous, last), `move_tab`, Close
 Other Tabs, and Close Tabs to the Right — operates within the current

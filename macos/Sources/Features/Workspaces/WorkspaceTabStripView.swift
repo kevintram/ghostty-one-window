@@ -437,6 +437,7 @@ private struct TabButton: View {
             // Also slides the icon over, which moves whenever this changes.
             .animation(.easeOut(duration: 0.12), value: backgroundOpacity)
             .contentShape(Rectangle())
+            .onMiddleClick { close(true) }
             .onHover { hovering = $0 }
             // The full title, which narrow tabs cut short or leave out.
             .help(title)

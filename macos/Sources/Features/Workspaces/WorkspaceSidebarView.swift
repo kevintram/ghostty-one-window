@@ -87,6 +87,7 @@ private struct WorkspaceListView: View {
                             isDropTarget: workspace.id == dropTarget,
                             isRenaming: isRenaming,
                             select: { controller.value?.selectWorkspace(workspace.id) },
+                            close: { controller.value?.close(workspace: workspace.id) },
                             endRenaming: { controller.value?.endRenamingWorkspace(workspace.id, name: $0) })
                             .frame(height: Self.rowHeight)
                             .offset(y: offset(at: index))
@@ -351,6 +352,7 @@ private struct WorkspaceRow: View {
     let isDropTarget: Bool
     let isRenaming: Bool
     let select: () -> Void
+    let close: () -> Void
     let endRenaming: (_ name: String?) -> Void
 
     private var name: String { workspace.name }
@@ -382,6 +384,7 @@ private struct WorkspaceRow: View {
             }
         }
         .contentShape(Rectangle())
+        .onMiddleClick { close() }
         // One button for VoiceOver, except while renaming, when the name
         // field must stay reachable.
         .accessibilityElement(children: isRenaming ? .contain : .combine)
