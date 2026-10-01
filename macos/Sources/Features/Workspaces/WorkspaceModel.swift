@@ -152,6 +152,10 @@ final class WorkspaceModel: ObservableObject {
     /// `workspaceDrag`), until it's dropped there or leaves.
     @Published var incomingWorkspace: Workspace?
 
+    /// The terminal's padding on its leading edge, which the first tab's
+    /// icon lines up with while the tab shows no background.
+    @Published var terminalLeadingPadding: CGFloat = 0
+
     /// The fixed width of the workspace sidebar.
     static let sidebarWidth: CGFloat = 200
 

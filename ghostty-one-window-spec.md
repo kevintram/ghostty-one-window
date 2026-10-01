@@ -170,8 +170,10 @@ selects that tab's workspace.
 The tab strip sits above the terminal, below the titlebar, and shows only the
 selected workspace's tabs, in order. Each tab is a capsule showing a terminal
 icon, its title, and a close button on hover. Resting tabs are transparent,
-hovered ones tinted, and the selected one Liquid Glass. The strip ends with a
-New Tab button.
+hovered ones tinted, and the selected one Liquid Glass. A resting tab's icon
+sits nearer its leading edge, the first tab's in line with the terminal's
+text (its `window-padding-x`), and slides over to make room when the tab is
+hovered or selected. A New Tab button is anchored to the strip's end.
 
 However many tabs there are, they share the strip's width and keep
 shrinking, as in Chrome: titles shorten, then the close button's space goes

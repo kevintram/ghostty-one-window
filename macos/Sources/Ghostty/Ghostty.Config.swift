@@ -234,6 +234,15 @@ extension Ghostty {
             return ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) ? v : nil
         }
 
+        /// The terminal's padding on its leading edge, in points.
+        var windowPaddingLeft: CGFloat {
+            guard let config = self.config else { return 2 }
+            var v = ghostty_config_window_padding_s()
+            let key = "window-padding-x"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return 2 }
+            return CGFloat(v.top_left)
+        }
+
         var windowNewTabPosition: String {
             guard let config = self.config else { return "" }
             var v: UnsafePointer<Int8>?
