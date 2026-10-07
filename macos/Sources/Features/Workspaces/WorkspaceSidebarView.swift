@@ -358,6 +358,8 @@ private struct WorkspaceRow: View {
     let close: () -> Void
     let endRenaming: (_ name: String?) -> Void
 
+    @State private var hovering = false
+
     private var name: String { workspace.name }
 
     var body: some View {
@@ -374,6 +376,14 @@ private struct WorkspaceRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
+            // In the name's trailing space, so it only cuts a long name's
+            // end shorter. Closing the last workspace closes the window.
+            if hovering && !isRenaming && !isDropTarget {
+                Spacer(minLength: 0)
+                HoverCloseButton(action: close)
+                    // VoiceOver closes the workspace with the row's action.
+                    .accessibilityHidden(true)
+            }
         }
         // A drop target is filled with the accent color, like Finder's.
         .foregroundStyle(isDropTarget ? Color.white : Color.primary)
@@ -388,6 +398,7 @@ private struct WorkspaceRow: View {
         }
         .contentShape(Rectangle())
         .onMiddleClick { close() }
+        .onHover { hovering = $0 }
         .hoverTooltip(name)
         // One button for VoiceOver, except while renaming, when the name
         // field must stay reachable.
@@ -395,5 +406,6 @@ private struct WorkspaceRow: View {
         .accessibilityAddTraits(isRenaming ? [] : isSelected ? [.isButton, .isSelected] : .isButton)
         // Pointer selection happens in the list's drag gesture, on press.
         .accessibilityAction { select() }
+        .accessibilityAction(named: "Close Workspace", close)
     }
 }
