@@ -581,7 +581,6 @@ private struct TabButton: View {
                 .frame(width: Self.closeCircleSize, height: Self.closeCircleSize)
         }
         .buttonStyle(HoverCircleButtonStyle())
-        .hoverTooltip("Close Tab")
         // Laid out as just the glyph, so the × sits flush with the tab's edge
         // and its circle extends past it.
         .padding(-Self.closeCircleOverhang)
