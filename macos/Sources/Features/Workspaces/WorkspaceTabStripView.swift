@@ -573,17 +573,7 @@ private struct TabButton: View {
     }
 
     private var closeButton: some View {
-        Button {
-            close(NSApp.currentEvent?.type == .leftMouseUp)
-        } label: {
-            Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .semibold))
-                .frame(width: Self.closeCircleSize, height: Self.closeCircleSize)
-        }
-        .buttonStyle(HoverCircleButtonStyle())
-        // Laid out as just the glyph, so the × sits flush with the tab's edge
-        // and its circle extends past it.
-        .padding(-Self.closeCircleOverhang)
+        HoverCloseButton { close(NSApp.currentEvent?.type == .leftMouseUp) }
     }
 
     /// Below these widths, a tab drops to the next layout.
@@ -596,9 +586,6 @@ private struct TabButton: View {
 
     private static let closeWidth: CGFloat = 24
 
-    /// The close button's hover circle, and how far it extends past the ×.
-    private static let closeCircleSize: CGFloat = 16
-    private static let closeCircleOverhang: CGFloat = 4
     private static let spacing: CGFloat = 4
     /// Keeps the icon and close button clear of the capsule's rounded ends.
     private static let inset: CGFloat = 8
@@ -626,34 +613,5 @@ private struct TabButton: View {
 #else
         Capsule().fill(Color.primary.opacity(backgroundOpacity))
 #endif
-    }
-}
-
-/// The tab strip's glyph buttons (new tab, close tab). Muted at rest, the
-/// glyph brightens while hovered and a circle filling the label's frame
-/// appears behind it, marking its hit area, and darkens while pressed.
-private struct HoverCircleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HoverCircleButton(configuration: configuration)
-    }
-
-    private struct HoverCircleButton: View {
-        let configuration: Configuration
-
-        @State private var hovering = false
-
-        var body: some View {
-            configuration.label
-                .foregroundStyle(hovering ? .primary : .secondary)
-                .background(Circle().fill(Color.primary.opacity(circleOpacity)))
-                .contentShape(Circle())
-                .onHover { hovering = $0 }
-                .animation(.easeOut(duration: 0.1), value: circleOpacity)
-        }
-
-        private var circleOpacity: Double {
-            if configuration.isPressed { return 0.2 }
-            return hovering ? 0.12 : 0
-        }
     }
 }
