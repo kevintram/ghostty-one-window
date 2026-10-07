@@ -260,22 +260,23 @@ private final class HoverTooltipTrackingView: NSView {
     }
 }
 
-/// A nonactivating, mouse-transparent panel styled like an AppKit tooltip.
-/// It's centered below the view it describes, rather than placed by the
-/// pointer, so it lines up with that view wherever it was entered.
+/// A nonactivating, mouse-transparent panel styled like Safari's tab
+/// tooltips: an opaque rounded card with a bold label. It's centered below
+/// the view it describes, rather than placed by the pointer, so it lines up
+/// with that view wherever it was entered.
 @MainActor
 private final class HoverTooltipPanel: NSPanel {
-    private let effect = NSVisualEffectView()
+    private let card = HoverTooltipCard()
     private let label = NSTextField(labelWithString: "")
 
     /// The tooltip shown, and the view it's shown below.
     private var tooltip: HoverTooltip?
     private weak var anchor: NSView?
 
-    private lazy var minWidthConstraint = effect.widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
+    private lazy var minWidthConstraint = card.widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
 
     /// The space between the tooltip and its view.
-    private static let gap: CGFloat = 4
+    private static let gap: CGFloat = 5
 
     init() {
         super.init(
@@ -293,30 +294,22 @@ private final class HoverTooltipPanel: NSPanel {
         animationBehavior = .none
         collectionBehavior = [.transient, .ignoresCycle]
 
-        effect.material = .toolTip
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        effect.wantsLayer = true
-        effect.layer?.cornerRadius = 4
-        effect.layer?.borderWidth = 0.5
-        effect.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
-
-        label.font = .toolTipsFont(ofSize: NSFont.smallSystemFontSize)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .bold)
         label.textColor = .labelColor
         label.maximumNumberOfLines = 0
         label.lineBreakMode = .byWordWrapping
         label.alignment = .natural
         label.translatesAutoresizingMaskIntoConstraints = false
-        effect.addSubview(label)
+        card.addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 6),
-            label.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -6),
-            label.topAnchor.constraint(equalTo: effect.topAnchor, constant: 3),
-            label.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -3),
+            label.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 15),
+            label.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -15),
+            label.topAnchor.constraint(equalTo: card.topAnchor, constant: 9),
+            label.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -9),
             label.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
             minWidthConstraint,
         ])
-        contentView = effect
+        contentView = card
     }
 
     func show(_ tooltip: HoverTooltip, below view: NSView) {
@@ -337,8 +330,8 @@ private final class HoverTooltipPanel: NSPanel {
         self.tooltip = tooltip
         label.stringValue = tooltip.text
         minWidthConstraint.constant = tooltip.minWidth
-        effect.needsLayout = true
-        effect.layoutSubtreeIfNeeded()
+        card.needsLayout = true
+        card.layoutSubtreeIfNeeded()
         if isVisible { place() }
     }
 
@@ -352,12 +345,67 @@ private final class HoverTooltipPanel: NSPanel {
     /// above it when there's no room below, kept on the view's screen.
     private func place() {
         guard let anchor, let window = anchor.window else { return }
-        let size = effect.fittingSize
+        let size = card.fittingSize
         let rect = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
         let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
         var origin = NSPoint(x: rect.midX - size.width / 2, y: rect.minY - Self.gap - size.height)
         origin.x = min(max(origin.x, visible.minX), visible.maxX - size.width)
         if origin.y < visible.minY { origin.y = rect.maxY + Self.gap }
         setFrame(NSRect(origin: origin, size: size), display: true)
+        // The shadow follows the card's shape, so it's redrawn at its size.
+        invalidateShadow()
+    }
+}
+
+/// The tooltip's rounded card, matching Safari's: white with a faint edge in
+/// light mode, and in dark mode a dark gray with a black edge and a faint
+/// highlight just inside it. The window's shadow follows its shape.
+private final class HoverTooltipCard: NSView {
+    /// A view rather than a bare sublayer, whose frame changes would
+    /// animate, visibly resizing it each time the tooltip does.
+    private let highlight = NSView()
+
+    private static let cornerRadius: CGFloat = 12
+    private static let edgeWidth: CGFloat = 0.5
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = Self.cornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = Self.edgeWidth
+
+        // Just inside the edge, and twice its width, as in Safari.
+        highlight.wantsLayer = true
+        highlight.layer?.cornerRadius = Self.cornerRadius - Self.edgeWidth
+        highlight.layer?.cornerCurve = .continuous
+        highlight.layer?.borderWidth = Self.edgeWidth * 2
+        highlight.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(highlight)
+        NSLayoutConstraint.activate([
+            highlight.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.edgeWidth),
+            highlight.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.edgeWidth),
+            highlight.topAnchor.constraint(equalTo: topAnchor, constant: Self.edgeWidth),
+            highlight.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.edgeWidth),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func updateLayer() {
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        layer?.backgroundColor = (dark ? NSColor(white: 0.15, alpha: 1) : .white).cgColor
+        layer?.borderColor = (dark ? NSColor(white: 0.04, alpha: 1) : NSColor(white: 0, alpha: 0.2)).cgColor
+        highlight.layer?.borderColor = NSColor(white: 1, alpha: 0.10).cgColor
+        highlight.isHidden = !dark
     }
 }
