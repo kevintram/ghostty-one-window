@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+/// A tooltip's text, and the least width it's shown at.
+struct HoverTooltip: Equatable {
+    let text: String
+    let minWidth: CGFloat
+}
+
 /// Coordinates the tooltips in one workspace window. AppKit's native help
 /// tags don't expose their delay and can restart their timer when SwiftUI
 /// replaces hovered content, so these tooltips use stable tracking views and
@@ -14,13 +20,13 @@ final class HoverTooltipCoordinator {
     private final class Target {
         let id: UUID
         weak var view: NSView?
-        var text: String
+        var tooltip: HoverTooltip
         let order: UInt64
 
-        init(id: UUID, view: NSView, text: String, order: UInt64) {
+        init(id: UUID, view: NSView, tooltip: HoverTooltip, order: UInt64) {
             self.id = id
             self.view = view
-            self.text = text
+            self.tooltip = tooltip
             self.order = order
         }
     }
@@ -39,20 +45,20 @@ final class HoverTooltipCoordinator {
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
     }
 
-    func entered(id: UUID, view: NSView, text: String) {
+    func entered(id: UUID, view: NSView, tooltip: HoverTooltip) {
         nextOrder &+= 1
-        targets[id] = Target(id: id, view: view, text: text, order: nextOrder)
+        targets[id] = Target(id: id, view: view, tooltip: tooltip, order: nextOrder)
         coolTask?.cancel()
         coolTask = nil
         installEventMonitor()
         activate(id)
     }
 
-    func updated(id: UUID, view: NSView, text: String) {
+    func updated(id: UUID, view: NSView, tooltip: HoverTooltip) {
         guard let target = targets[id] else { return }
         target.view = view
-        target.text = text
-        if displayedID == id { panel.update(text: text) }
+        target.tooltip = tooltip
+        if displayedID == id { panel.update(tooltip) }
     }
 
     func exited(id: UUID) {
@@ -91,7 +97,7 @@ final class HoverTooltipCoordinator {
 
             self.displayedID = id
             self.isWarm = true
-            self.panel.show(text: target.text, near: NSEvent.mouseLocation, in: view.window)
+            self.panel.show(target.tooltip, below: view)
         }
     }
 
@@ -161,18 +167,18 @@ private extension EnvironmentValues {
 
 private struct HoverTooltipModifier: ViewModifier {
     @Environment(\.hoverTooltipCoordinator) private var coordinator
-    let text: String
+    let tooltip: HoverTooltip
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if let coordinator {
             content
                 .overlay {
-                    HoverTooltipTrackingRegion(text: text, coordinator: coordinator)
+                    HoverTooltipTrackingRegion(tooltip: tooltip, coordinator: coordinator)
                 }
-                .accessibilityHint(text)
+                .accessibilityHint(tooltip.text)
         } else {
-            content.help(text)
+            content.help(tooltip.text)
         }
     }
 }
@@ -183,19 +189,20 @@ extension View {
         environment(\.hoverTooltipCoordinator, coordinator)
     }
 
-    /// Shows help text with the workspace window's shared tooltip timing.
-    func hoverTooltip(_ text: String) -> some View {
-        modifier(HoverTooltipModifier(text: text))
+    /// Shows help text with the workspace window's shared tooltip timing,
+    /// centered below the view and at least `minWidth` wide, so even a
+    /// short text like "~" stands out.
+    func hoverTooltip(_ text: String, minWidth: CGFloat = 40) -> some View {
+        modifier(HoverTooltipModifier(tooltip: HoverTooltip(text: text, minWidth: minWidth)))
     }
 }
 
 private struct HoverTooltipTrackingRegion: NSViewRepresentable {
-    let text: String
+    let tooltip: HoverTooltip
     let coordinator: HoverTooltipCoordinator
 
     func makeNSView(context: Context) -> HoverTooltipTrackingView {
-        let view = HoverTooltipTrackingView()
-        view.text = text
+        let view = HoverTooltipTrackingView(tooltip: tooltip)
         view.coordinator = coordinator
         return view
     }
@@ -203,11 +210,11 @@ private struct HoverTooltipTrackingRegion: NSViewRepresentable {
     func updateNSView(_ view: HoverTooltipTrackingView, context: Context) {
         if view.isInside, view.coordinator !== coordinator {
             view.coordinator?.exited(id: view.id)
-            coordinator.entered(id: view.id, view: view, text: text)
+            coordinator.entered(id: view.id, view: view, tooltip: tooltip)
         }
-        view.text = text
+        view.tooltip = tooltip
         view.coordinator = coordinator
-        coordinator.updated(id: view.id, view: view, text: text)
+        coordinator.updated(id: view.id, view: view, tooltip: tooltip)
     }
 
     static func dismantleNSView(_ view: HoverTooltipTrackingView, coordinator: ()) {
@@ -218,8 +225,17 @@ private struct HoverTooltipTrackingRegion: NSViewRepresentable {
 private final class HoverTooltipTrackingView: NSView {
     let id = UUID()
     weak var coordinator: HoverTooltipCoordinator?
-    var text = ""
+    var tooltip: HoverTooltip
     fileprivate var isInside = false
+
+    init(tooltip: HoverTooltip) {
+        self.tooltip = tooltip
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -235,7 +251,7 @@ private final class HoverTooltipTrackingView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         isInside = true
-        coordinator?.entered(id: id, view: self, text: text)
+        coordinator?.entered(id: id, view: self, tooltip: tooltip)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -245,10 +261,21 @@ private final class HoverTooltipTrackingView: NSView {
 }
 
 /// A nonactivating, mouse-transparent panel styled like an AppKit tooltip.
+/// It's centered below the view it describes, rather than placed by the
+/// pointer, so it lines up with that view wherever it was entered.
 @MainActor
 private final class HoverTooltipPanel: NSPanel {
     private let effect = NSVisualEffectView()
     private let label = NSTextField(labelWithString: "")
+
+    /// The tooltip shown, and the view it's shown below.
+    private var tooltip: HoverTooltip?
+    private weak var anchor: NSView?
+
+    private lazy var minWidthConstraint = effect.widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
+
+    /// The space between the tooltip and its view.
+    private static let gap: CGFloat = 4
 
     init() {
         super.init(
@@ -278,6 +305,7 @@ private final class HoverTooltipPanel: NSPanel {
         label.textColor = .labelColor
         label.maximumNumberOfLines = 0
         label.lineBreakMode = .byWordWrapping
+        label.alignment = .natural
         label.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(label)
         NSLayoutConstraint.activate([
@@ -286,40 +314,50 @@ private final class HoverTooltipPanel: NSPanel {
             label.topAnchor.constraint(equalTo: effect.topAnchor, constant: 3),
             label.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -3),
             label.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
+            minWidthConstraint,
         ])
         contentView = effect
     }
 
-    func show(text: String, near point: NSPoint, in parent: NSWindow?) {
-        update(text: text)
-        let size = effect.fittingSize
-        setContentSize(size)
+    func show(_ tooltip: HoverTooltip, below view: NSView) {
+        guard let parent = view.window else { return }
+        anchor = view
+        update(tooltip)
+        place()
 
-        let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? parent?.screen
-        let visible = screen?.visibleFrame ?? .zero
-        var origin = NSPoint(x: point.x + 10, y: point.y - size.height - 16)
-        if origin.x + size.width > visible.maxX { origin.x = visible.maxX - size.width }
-        origin.x = max(origin.x, visible.minX)
-        if origin.y < visible.minY { origin.y = min(point.y + 18, visible.maxY - size.height) }
-        setFrameOrigin(origin)
-
-        if let parent, self.parent !== parent {
+        if self.parent !== parent {
             self.parent?.removeChildWindow(self)
             parent.addChildWindow(self, ordered: .above)
         }
         orderFront(nil)
     }
 
-    func update(text: String) {
-        guard label.stringValue != text else { return }
-        label.stringValue = text
+    func update(_ tooltip: HoverTooltip) {
+        guard self.tooltip != tooltip else { return }
+        self.tooltip = tooltip
+        label.stringValue = tooltip.text
+        minWidthConstraint.constant = tooltip.minWidth
         effect.needsLayout = true
         effect.layoutSubtreeIfNeeded()
-        if isVisible { setContentSize(effect.fittingSize) }
+        if isVisible { place() }
     }
 
     func hide() {
+        anchor = nil
         parent?.removeChildWindow(self)
         orderOut(nil)
+    }
+
+    /// Sizes the tooltip to its text and centers it below its view, or
+    /// above it when there's no room below, kept on the view's screen.
+    private func place() {
+        guard let anchor, let window = anchor.window else { return }
+        let size = effect.fittingSize
+        let rect = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        var origin = NSPoint(x: rect.midX - size.width / 2, y: rect.minY - Self.gap - size.height)
+        origin.x = min(max(origin.x, visible.minX), visible.maxX - size.width)
+        if origin.y < visible.minY { origin.y = rect.maxY + Self.gap }
+        setFrame(NSRect(origin: origin, size: size), display: true)
     }
 }

@@ -399,7 +399,7 @@ private struct WorkspaceRow: View {
         .contentShape(Rectangle())
         .onMiddleClick { close() }
         .onHover { hovering = $0 }
-        .hoverTooltip(name)
+        .hoverTooltip(name, minWidth: 60)
         // One button for VoiceOver, except while renaming, when the name
         // field must stay reachable.
         .accessibilityElement(children: isRenaming ? .contain : .combine)

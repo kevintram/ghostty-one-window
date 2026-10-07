@@ -443,7 +443,7 @@ private struct TabButton: View {
             .onMiddleClick { close(true) }
             .onHover { hovering = $0 }
             // The full title, which narrow tabs cut short or leave out.
-            .hoverTooltip(title)
+            .hoverTooltip(title, minWidth: 120)
             // One button for VoiceOver, except while renaming, when the title
             // field must stay reachable.
             .accessibilityElement(children: isRenaming ? .contain : .combine)
