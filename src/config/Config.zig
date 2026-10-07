@@ -2310,6 +2310,9 @@ keybind: Keybinds = .{},
 ///     or at the end if there are no focused tabs.
 ///
 ///   * `end` - Insert the new tab at the end of the tab list.
+///
+/// On macOS, new workspaces are placed the same way in the sidebar: after
+/// the selected workspace, or at the end.
 @"window-new-tab-position": WindowNewTabPosition = .current,
 
 /// Whether to show the tab bar.

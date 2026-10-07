@@ -167,6 +167,18 @@ extension TerminalController {
         return tab
     }
 
+    /// Adds an empty workspace and returns its ID. Like a new tab, it goes
+    /// right after `anchor` or at the end, following
+    /// `window-new-tab-position`.
+    private func addWorkspace(after anchor: UUID?) -> UUID {
+        var index: Int?
+        if ghostty.config.windowNewTabPosition != "end",
+           let anchor, let anchorIndex = workspaceModel.workspaceIndex(of: anchor) {
+            index = anchorIndex + 1
+        }
+        return workspaceModel.addWorkspace(at: index)
+    }
+
     /// Adds a tab to a workspace, right after `anchor` if given, starting in
     /// the working directory of `anchor` (else the workspace's current tab).
     /// Undoing it closes the tab.
@@ -581,10 +593,11 @@ extension TerminalController {
         supportsTabs && TerminalController.all.contains { $0 !== self && $0.supportsTabs }
     }
 
-    /// Moves a tab into a new workspace, at the end, and follows it there.
+    /// Moves a tab into a new workspace, placed after its own (see
+    /// `addWorkspace(after:)`), and follows it there.
     func moveTabToNewWorkspace(_ tab: TerminalTab) {
-        guard workspaceModel.contains(tab) else { return }
-        moveTab(tab, toWorkspace: workspaceModel.addWorkspace())
+        guard let source = workspaceModel.workspace(of: tab) else { return }
+        moveTab(tab, toWorkspace: addWorkspace(after: source.id))
     }
 
     /// Moves a tab into a new window of its own, in a workspace named after
@@ -809,7 +822,7 @@ extension TerminalController {
 
         var config = Ghostty.SurfaceConfiguration()
         config.workingDirectory = focusedSurface?.pwd
-        addTab(withBaseConfig: config, inWorkspace: workspaceModel.addWorkspace())
+        addTab(withBaseConfig: config, inWorkspace: addWorkspace(after: workspaceModel.selectedWorkspaceID))
     }
 
     /// Selects workspace `sender.tag` (from 1), or the last one for 9, like
