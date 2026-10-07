@@ -121,6 +121,11 @@ final class WorkspaceModel: ObservableObject {
     /// hidden; a restored or reopened window keeps its own.
     @Published var isSidebarCollapsed = true
 
+    /// The workspace sidebar's width while it shows, set by dragging its
+    /// divider. New windows start with the width last dragged to in any
+    /// window; a restored or reopened window keeps its own.
+    @Published var sidebarWidth = WorkspaceModel.lastSidebarWidth
+
     /// What's being renamed in place, one thing at a time: a tab in the tab
     /// strip (which shows while it is, even for a single tab), or a
     /// workspace in the sidebar.
@@ -169,8 +174,25 @@ final class WorkspaceModel: ObservableObject {
     /// icon lines up with while the tab shows no background.
     @Published var terminalLeadingPadding: CGFloat = 0
 
-    /// The fixed width of the workspace sidebar.
-    static let sidebarWidth: CGFloat = 200
+    /// The range the sidebar's divider can be dragged within, and its
+    /// width before it's ever dragged.
+    static let sidebarWidthRange: ClosedRange<CGFloat> = 150...400
+    static let defaultSidebarWidth: CGFloat = 200
+
+    /// The width last dragged to in any window, for new windows.
+    static var lastSidebarWidth: CGFloat {
+        get {
+            let width = UserDefaults.standard.double(forKey: lastSidebarWidthKey)
+            return width > 0 ? clampedSidebarWidth(width) : defaultSidebarWidth
+        }
+        set { UserDefaults.standard.set(Double(newValue), forKey: lastSidebarWidthKey) }
+    }
+
+    private static let lastSidebarWidthKey = "WorkspaceSidebarWidth"
+
+    static func clampedSidebarWidth(_ width: CGFloat) -> CGFloat {
+        min(max(width, sidebarWidthRange.lowerBound), sidebarWidthRange.upperBound)
+    }
 
     /// The fixed height of the tab strip above the terminal.
     static let tabStripHeight: CGFloat = 32

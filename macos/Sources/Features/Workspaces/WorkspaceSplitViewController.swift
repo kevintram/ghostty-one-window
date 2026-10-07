@@ -20,6 +20,8 @@ final class WorkspaceSplitViewController: NSSplitViewController {
     private var tabStripVisibility: AnyCancellable?
     private var dropSidebarVisibility: AnyCancellable?
     private var sidebarCollapse: AnyCancellable?
+    private var sidebarCollapseObservation: NSKeyValueObservation?
+    private var sidebarWidth: AnyCancellable?
     private var workspaceSwitcherDeactivation: AnyCancellable?
     private var workspaceSwitcherEventMonitor: Any?
     private var workspaceSwitcherModifiers: NSEvent.ModifierFlags = []
@@ -82,9 +84,26 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         // after `canCollapse`, which resets it for sidebars.
         sidebar.canCollapseFromWindowResize = false
         sidebar.allowsFullHeightLayout = true
-        sidebar.minimumThickness = WorkspaceModel.sidebarWidth
-        sidebar.maximumThickness = WorkspaceModel.sidebarWidth
+        sidebar.minimumThickness = WorkspaceModel.sidebarWidthRange.lowerBound
+        sidebar.maximumThickness = WorkspaceModel.sidebarWidthRange.upperBound
         addSplitViewItem(sidebar)
+
+        // The sidebar keeps the model's width while it shows, including when
+        // it expands and when the window resizes: this is above the item's
+        // holding priority. It's below a divider drag's, which then sets the
+        // model's width (see `WorkspaceSplitView.mouseDown`).
+        let sidebarWidthConstraint = sidebarController.view.widthAnchor.constraint(
+            equalToConstant: model.sidebarWidth)
+        sidebarWidthConstraint.priority = .init(300)
+        sidebarWidthConstraint.isActive = true
+        sidebarWidth = model.$sidebarWidth
+            .removeDuplicates()
+            .sink { [weak self] width in
+                MainActor.assumeIsolated {
+                    sidebarWidthConstraint.constant = width
+                    self?.controller?.invalidateRestorableState()
+                }
+            }
 
         // The sidebar's state is saved with the window's (see
         // TerminalRestorableState), so a change marks it for saving.
@@ -96,6 +115,15 @@ final class WorkspaceSplitViewController: NSSplitViewController {
                     self?.controller?.invalidateRestorableState()
                 }
             }
+
+        // Dragging the divider past the sidebar's minimum width collapses
+        // it, which the model follows.
+        sidebarCollapseObservation = sidebar.observe(\.isCollapsed) { [weak self] item, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.model.isSidebarCollapsed != item.isCollapsed else { return }
+                self.model.isSidebarCollapsed = item.isCollapsed
+            }
+        }
 
         // The terminal column extends under the titlebar, so pin our tab
         // strip below its safe area and the terminal below the strip.
@@ -143,6 +171,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             splitView.terminalContainer = terminalContainer
             splitView.terminalTop = terminalTop
             splitView.sidebarItem = sidebar
+            splitView.model = model
         }
 
         NSLayoutConstraint.activate([
@@ -232,8 +261,10 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             dropSidebar.topAnchor.constraint(equalTo: view.topAnchor),
             dropSidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             dropSidebar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            dropSidebar.widthAnchor.constraint(equalToConstant: WorkspaceModel.sidebarWidth),
         ])
+        // It takes the sidebar's width each time it shows.
+        let width = dropSidebar.widthAnchor.constraint(equalToConstant: model.sidebarWidth)
+        width.isActive = true
 
         dropSidebarVisibility = model.$isSidebarCollapsed
             .combineLatest(
@@ -247,6 +278,7 @@ final class WorkspaceSplitViewController: NSSplitViewController {
                     dropSidebar.subviews.forEach { $0.removeFromSuperview() }
                     dropSidebar.isHidden = !visible
                     guard visible else { return }
+                    width.constant = self.model.sidebarWidth
 
                     let list = NSHostingView(rootView: WorkspaceSidebarView(
                         model: self.model,
@@ -428,6 +460,21 @@ private final class WorkspaceSplitView: NSSplitView {
     /// while it takes room.
     weak var terminalTop: NSLayoutConstraint?
     weak var sidebarItem: NSSplitViewItem?
+    weak var model: WorkspaceModel?
+
+    // A divider drag is tracked until the mouse is released before this
+    // returns. The sidebar then keeps the width it was dragged to, for this
+    // window and new ones. Dragged closed, it keeps its width from before
+    // instead, to show again with.
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        guard let model, let sidebarItem, !sidebarItem.isCollapsed else { return }
+
+        let width = sidebarItem.viewController.view.frame.width
+        guard width != model.sidebarWidth else { return }
+        model.sidebarWidth = width
+        WorkspaceModel.lastSidebarWidth = width
+    }
 
     // AppKit gives each split view column its own titlebar background, with
     // macOS 26's scroll edge effect, drawn as an opaque band (and separator)
@@ -456,8 +503,10 @@ private final class WorkspaceSplitView: NSSplitView {
             return super.intrinsicContentSize
         }
 
+        let sidebarWidth = sidebarItem?.isCollapsed ?? false
+            ? 0 : dividerThickness + (model?.sidebarWidth ?? WorkspaceModel.defaultSidebarWidth)
         return NSSize(
-            width: size.width + (sidebarItem?.isCollapsed ?? false ? 0 : dividerThickness + WorkspaceModel.sidebarWidth),
+            width: size.width + sidebarWidth,
             height: size.height + safeAreaInsets.top + (terminalTop?.constant ?? 0))
     }
 }

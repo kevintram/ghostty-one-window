@@ -85,6 +85,9 @@ final class TerminalRestorableState: TerminalRestorable {
     var sidebarCollapsed: Bool? {
         internalState.sidebarCollapsed
     }
+    var sidebarWidth: CGFloat? {
+        internalState.sidebarWidth
+    }
 
     /// Internal State we use to perform unit tests
     ///
@@ -185,6 +188,9 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         c.restoreWorkspaces(state.workspaces)
         if let collapsed = state.sidebarCollapsed {
             c.workspaceModel.isSidebarCollapsed = collapsed
+        }
+        if let width = state.sidebarWidth {
+            c.workspaceModel.sidebarWidth = WorkspaceModel.clampedSidebarWidth(width)
         }
 
         // Setup our restored state on the controller

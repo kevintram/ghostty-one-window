@@ -27,6 +27,10 @@ extension TerminalRestorableState {
         /// which gets the default.
         var sidebarCollapsed: Bool?
 
+        /// The workspace sidebar's width. Nil in older state, which gets the
+        /// width new windows start with.
+        var sidebarWidth: CGFloat?
+
         struct WorkspaceState: Codable {
             let customName: String?
             let tabs: [TabState]
@@ -64,6 +68,7 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
                     selectedTab: workspace.tabs.firstIndex { $0 === workspace.selectedTab } ?? 0)
             },
             sidebarCollapsed: model.isSidebarCollapsed,
+            sidebarWidth: model.sidebarWidth,
         )
     }
 }
