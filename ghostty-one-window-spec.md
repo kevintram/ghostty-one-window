@@ -169,9 +169,10 @@ selects that tab's workspace.
 
 The tab strip sits above the terminal, below the titlebar, and shows only the
 selected workspace's tabs, in order. Each tab is a capsule showing a terminal
-icon, its title, and a close button on hover. Resting tabs are transparent,
-hovered ones tinted, and the selected one Liquid Glass. A New Tab button is
-anchored to the strip's end.
+icon, its title, and a close button on hover. The tabs sit on a tinted,
+rounded track, like macOS's own tab bar. Resting tabs show only the track,
+hovered ones are tinted, and the selected one is Liquid Glass. A New Tab
+button sits past the track's end.
 
 However many tabs there are, they share the strip's width and keep
 shrinking, as in Chrome: titles shorten, then the close button's space goes

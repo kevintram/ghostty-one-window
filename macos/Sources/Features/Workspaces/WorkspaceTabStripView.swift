@@ -42,9 +42,13 @@ private struct TabStrip: View {
     private static let spacing: CGFloat = 4
     private static let inset = (WorkspaceModel.tabStripHeight - 24) / 2
     private static let newTabWidth: CGFloat = 24
-    /// The least room between the last tab and the new tab button, matching
-    /// the button's gap from the strip's edge.
+    /// The new tab button's gap from the track, matching its gap from the
+    /// strip's edge.
     private static let newTabGap = inset
+    /// The tint of the track behind the tabs, over the window's background,
+    /// and of its hairline edge, which keeps its shape over busy backgrounds.
+    private static let trackOpacity = 0.12
+    private static let trackEdgeOpacity = 0.08
     private static let holdDuration: Duration = .seconds(1)
     private static let slideDuration = 0.15
     private static let slide = Animation.easeOut(duration: slideDuration)
@@ -56,7 +60,7 @@ private struct TabStrip: View {
         let tabs = displayedTabs.filter { phase(of: $0) != .draggingOut }
         let widths = tabWidths(count: sizingCount(tabs.count), includingSelected: tabs.contains { $0 === selected })
 
-        HStack(spacing: 0) {
+        HStack(spacing: Self.newTabGap) {
             HStack(spacing: Self.spacing) {
                 ForEach(tabs) { tab in
                     TabButton(
@@ -84,10 +88,14 @@ private struct TabStrip: View {
                     .allowsHitTesting(tab !== model.incomingTab)
                 }
             }
-
-            // Anchored to the strip's end, even while the tabs are held
-            // narrower than the room they have (see `hold`).
-            Spacer(minLength: Self.newTabGap)
+            // The track spans the room the tabs share, even while they're
+            // held narrower than it (see `hold`).
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                Capsule()
+                    .fill(Color.primary.opacity(Self.trackOpacity))
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(Self.trackEdgeOpacity), lineWidth: 0.5))
+            }
 
             Button {
                 controller.value?.newTab(nil)
@@ -549,7 +557,7 @@ private struct TabButton: View {
     /// Keeps the icon and close button clear of the capsule's rounded ends.
     private static let inset: CGFloat = 8
 
-    /// The tint over the window's glass for each state: none at rest, then
+    /// The tint over the strip's track for each state: none at rest, then
     /// hovered, and selected (unchanged by hover) where Liquid Glass isn't
     /// available.
     private var backgroundOpacity: Double {
