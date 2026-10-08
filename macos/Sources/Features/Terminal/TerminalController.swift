@@ -81,7 +81,6 @@ class TerminalController: BaseTerminalController {
         let tab = TerminalTab(surfaceTree: surfaceTree)
         workspaceModel.insert(tab, inWorkspace: workspaceModel.addWorkspace())
         workspaceModel.select(tab)
-        workspaceModel.terminalLeadingPadding = ghostty.config.windowPaddingLeft
 
         // Setup our notifications for behaviors
         let center = NotificationCenter.default
@@ -499,7 +498,6 @@ class TerminalController: BaseTerminalController {
         if notification.object == nil {
             // Update our derived config
             self.derivedConfig = DerivedConfig(config)
-            workspaceModel.terminalLeadingPadding = config.windowPaddingLeft
 
             // If we have no surfaces in our window (is that possible?) then we update
             // our window appearance based on the root config. If we have surfaces, we

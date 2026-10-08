@@ -54,7 +54,6 @@ private struct TabStrip: View {
         // dragged in from another window shows as selected, as it will be.
         let selected = model.incomingTab ?? model.selectedTab
         let tabs = displayedTabs.filter { phase(of: $0) != .draggingOut }
-        let first = tabs.first
         let widths = tabWidths(count: sizingCount(tabs.count), includingSelected: tabs.contains { $0 === selected })
 
         HStack(spacing: 0) {
@@ -64,7 +63,6 @@ private struct TabStrip: View {
                         tab: tab,
                         isSelected: tab === selected,
                         width: tab === selected ? widths.selected : widths.other,
-                        leadingEdge: leadingEdge(isFirst: tab === first),
                         isRenaming: isRenaming(tab)
                     ) { title in
                         controller.value?.endRenamingTab(tab, title: title)
@@ -101,9 +99,7 @@ private struct TabStrip: View {
             .hoverTooltip("New Tab")
         }
         // Match the vertical inset: 24pt tabs centered in the strip's height.
-        // The first tab starts at the strip's edge instead and keeps that
-        // inset itself (see `leadingEdge(isFirst:)`).
-        .padding(.trailing, Self.inset)
+        .padding(.horizontal, Self.inset)
         // Measure the strip's width, not its content's: the tabs are sized
         // from it, so letting them feed back into it would keep the tabs
         // from ever shrinking. Without the zero minimum, the frame takes its
@@ -129,16 +125,6 @@ private struct TabStrip: View {
         .onDrop(of: [.ghosttyWorkspaceTab], delegate: self)
     }
 
-    /// A tab's leading edge. The first tab's background keeps the strip's
-    /// inset from the strip's edge, while its icon rests in line with the
-    /// terminal's text. Every tab's icon rests the same distance from where
-    /// its background starts, so they all slide alike.
-    private func leadingEdge(isFirst: Bool) -> TabButton.LeadingEdge {
-        .init(
-            gap: isFirst ? Self.inset : 0,
-            restingInset: model.terminalLeadingPadding - Self.inset)
-    }
-
     /// How many tabs to size the tabs for when the strip shows `count`: at
     /// least as many as are held (see `hold`).
     private func sizingCount(_ count: Int) -> Int {
@@ -160,7 +146,7 @@ private struct TabStrip: View {
     /// dragged out the strip holds one fewer.
     private func tabWidths(count: Int, includingSelected: Bool) -> (selected: CGFloat, other: CGFloat) {
         guard count > 0 else { return (0, 0) }
-        let available = max(width - Self.inset - Self.newTabGap - Self.newTabWidth - CGFloat(count - 1) * Self.spacing, 0)
+        let available = max(width - 2 * Self.inset - Self.newTabGap - Self.newTabWidth - CGFloat(count - 1) * Self.spacing, 0)
         let share = available / CGFloat(count)
         guard includingSelected, count > 1, share < TabButton.selectedMinWidth else { return (share, share) }
 
@@ -408,7 +394,7 @@ extension TabStrip: DropDelegate {
             if !model.contains(tab) { model.incomingTab = tab }
             guard let from = index(of: tab.id) else { return }
             let slots = slots
-            let center = CGFloat(from) * slots.stride + (slots.draggedStride - Self.spacing) / 2
+            let center = Self.inset + CGFloat(from) * slots.stride + (slots.draggedStride - Self.spacing) / 2
             model.tabDrag = Drag(id: tab.id, offset: slots.clamped(info.location.x - center, from: from))
         }
     }
@@ -418,7 +404,6 @@ private struct TabButton: View {
     @ObservedObject var tab: TerminalTab
     let isSelected: Bool
     let width: CGFloat
-    let leadingEdge: LeadingEdge
     let isRenaming: Bool
     let endRenaming: (_ title: String?) -> Void
     let select: () -> Void
@@ -434,10 +419,7 @@ private struct TabButton: View {
             .foregroundStyle(isSelected ? .primary : .secondary)
             .frame(width: width, height: 24)
             .clipped()
-            .background {
-                background.padding(.leading, leadingEdge.gap)
-            }
-            // Also slides the icon over, which moves whenever this changes.
+            .background { background }
             .animation(.easeOut(duration: 0.12), value: backgroundOpacity)
             .contentShape(Rectangle())
             .onMiddleClick { close(true) }
@@ -495,43 +477,20 @@ private struct TabButton: View {
                     .opacity(hovering ? 1 : 0)
                     .allowsHitTesting(hovering)
             }
-            .padding(.leading, leadingInset)
-            .padding(.trailing, Self.inset)
+            .padding(.horizontal, Self.inset)
 
         case .narrow:
             HStack(spacing: Self.spacing) {
                 iconOrClose
                 titleView
             }
-            .padding(.leading, leadingInset)
-            .padding(.trailing, Self.inset)
+            .padding(.horizontal, Self.inset)
 
         case .tiny:
             iconOrClose
                 .font(.system(size: tinyIconSize))
                 .frame(maxWidth: .infinity)
-                .padding(.leading, leadingEdge.gap)
         }
-    }
-
-    /// While a tab shows no background, its icon can rest nearer its leading
-    /// edge, sliding over to make room once the tab is selected or hovered.
-    struct LeadingEdge: Equatable {
-        /// The background's gap from the tab's leading edge.
-        let gap: CGFloat
-
-        /// How far the icon rests from where the background starts, while
-        /// the tab shows none. Kept within the tab, and no further in than
-        /// with a background, so it only ever slides inward.
-        let restingInset: CGFloat
-    }
-
-    /// The space before the icon (or the close button in its place).
-    private var leadingInset: CGFloat {
-        let inset = isSelected || hovering
-            ? Self.inset
-            : min(max(leadingEdge.restingInset, -leadingEdge.gap), Self.inset)
-        return leadingEdge.gap + inset
     }
 
     /// The icon, or once the close button has no space of its own, the close

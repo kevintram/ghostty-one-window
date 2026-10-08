@@ -561,12 +561,6 @@ typedef struct {
   ghostty_config_color_s colors[256];
 } ghostty_config_palette_s;
 
-// config.WindowPadding
-typedef struct {
-  uint32_t top_left;
-  uint32_t bottom_right;
-} ghostty_config_window_padding_s;
-
 // config.QuickTerminalSize
 typedef enum {
   GHOSTTY_QUICK_TERMINAL_SIZE_NONE,
