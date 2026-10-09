@@ -47,25 +47,33 @@ extension TerminalRestorableState {
 }
 
 extension TerminalRestorableState.InternalState where ViewType == Ghostty.SurfaceView {
+    /// Tabs that aren't restorable are left out, along with workspaces left
+    /// without tabs. If the selected tab isn't restorable, the window is
+    /// saved showing another tab, preferably of the selected workspace.
     @MainActor init(from controller: TerminalController) {
         let model = controller.workspaceModel
         let selected = model.selectedTab
+        let shown = ([selected].compactMap { $0 } + model.tabs + model.allTabs)
+            .first(where: \.isRestorable) ?? selected
+        let shownIsSelected = shown === selected
         self.init(
-            focusedSurface: controller.focusedSurface?.id.uuidString,
-            surfaceTree: controller.surfaceTree,
+            focusedSurface: (shownIsSelected ? controller.focusedSurface : shown?.focusedSurface)?.id.uuidString,
+            surfaceTree: shownIsSelected ? controller.surfaceTree : shown?.surfaceTree ?? .init(),
             effectiveFullscreenMode: controller.fullscreenStyle?.fullscreenMode,
             tabColor: (controller.window as? TerminalWindow)?.tabColor,
-            titleOverride: controller.titleOverride,
-            workspaces: model.workspaces.map { workspace in
-                WorkspaceState(
+            titleOverride: shownIsSelected ? controller.titleOverride : shown?.titleOverride,
+            workspaces: model.workspaces.compactMap { workspace in
+                let tabs = workspace.tabs.filter(\.isRestorable)
+                guard !tabs.isEmpty else { return nil }
+                return WorkspaceState(
                     customName: workspace.customName,
-                    tabs: workspace.tabs.map { tab in
+                    tabs: tabs.map { tab in
                         TabState(
-                            surfaceTree: tab === selected ? nil : tab.surfaceTree,
+                            surfaceTree: tab === shown ? nil : tab.surfaceTree,
                             focusedSurface: tab.focusedSurface?.id.uuidString,
                             titleOverride: tab.titleOverride)
                     },
-                    selectedTab: workspace.tabs.firstIndex { $0 === workspace.selectedTab } ?? 0)
+                    selectedTab: tabs.firstIndex { $0 === workspace.selectedTab } ?? 0)
             },
             sidebarCollapsed: model.isSidebarCollapsed,
             sidebarWidth: model.sidebarWidth,

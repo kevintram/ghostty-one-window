@@ -11,6 +11,10 @@ import Combine
 final class TerminalTab: ObservableObject, Identifiable {
     let id = UUID()
 
+    /// Whether the tab is saved for window restoration. A tab started with
+    /// a command isn't: it would come back as a shell in the same directory.
+    let isRestorable: Bool
+
     var surfaceTree: SplitTree<Ghostty.SurfaceView>
 
     /// The tab's focused terminal, focused again when the tab is selected.
@@ -41,8 +45,10 @@ final class TerminalTab: ObservableObject, Identifiable {
     init(
         surfaceTree: SplitTree<Ghostty.SurfaceView>,
         focusedSurface: Ghostty.SurfaceView? = nil,
-        titleOverride: String? = nil
+        titleOverride: String? = nil,
+        isRestorable: Bool = true
     ) {
+        self.isRestorable = isRestorable
         self.surfaceTree = surfaceTree
         self.focusedSurface = focusedSurface ?? surfaceTree.root?.leftmostLeaf()
         self.titleOverride = titleOverride

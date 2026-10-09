@@ -47,15 +47,14 @@ class TerminalController: BaseTerminalController {
     /// re-showing a tab/window that was already closed.
     private var pendingInitialPresentation: DispatchWorkItem?
 
-    /// This is set to false by init if the window managed by this controller should not be restorable.
-    /// For example, terminals executing custom scripts are not restorable.
-    private var restorable: Bool = true
-
     /// The configuration derived from the Ghostty config so we don't need to rely on references.
     private(set) var derivedConfig: DerivedConfig
 
     /// The notification cancellable for focused surface property changes.
     private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
+
+    /// Keeps the window's restorability in sync with its tabs.
+    private var restorationCancellable: AnyCancellable?
 
     /// The window's workspaces and tabs. See TerminalController+Workspace.
     let workspaceModel = WorkspaceModel()
@@ -65,22 +64,23 @@ class TerminalController: BaseTerminalController {
          withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
          parent: NSWindow? = nil
     ) {
-        // The window we manage is not restorable if we've specified a command
-        // to execute. We do this because the restored window is meaningless at the
-        // time of writing this: it'd just restore to a shell in the same directory
-        // as the script. We may want to revisit this behavior when we have scrollback
-        // restoration.
-        self.restorable = (base?.command ?? "") == ""
-
         // Setup our initial derived config based on the current app config
         self.derivedConfig = DerivedConfig(ghostty.config)
 
         super.init(ghostty, baseConfig: base, surfaceTree: tree)
 
-        // The initial split tree is the first tab of the first workspace.
-        let tab = TerminalTab(surfaceTree: surfaceTree)
+        // The initial split tree is the first tab of the first workspace. It
+        // isn't restorable if we've specified a command to execute, since it'd
+        // just restore to a shell in the same directory as the script. We may
+        // want to revisit this when we have scrollback restoration.
+        let tab = TerminalTab(surfaceTree: surfaceTree, isRestorable: (base?.command ?? "") == "")
         workspaceModel.insert(tab, inWorkspace: workspaceModel.addWorkspace())
         workspaceModel.select(tab)
+
+        // Published values are sent before they're stored, so use the sent one.
+        restorationCancellable = workspaceModel.$workspaces.sink { [weak self] workspaces in
+            MainActor.assumeIsolated { self?.syncRestoration(workspaces) }
+        }
 
         // Setup our notifications for behaviors
         let center = NotificationCenter.default
@@ -498,7 +498,7 @@ class TerminalController: BaseTerminalController {
         if notification.object == nil {
             // Update our derived config
             self.derivedConfig = DerivedConfig(config)
-            syncRestoration(config)
+            syncRestoration()
 
             // If we have no surfaces in our window (is that possible?) then we update
             // our window appearance based on the root config. If we have surfaces, we
@@ -514,11 +514,15 @@ class TerminalController: BaseTerminalController {
         /// ``TerminalController/focusedSurfaceDidChange(to:)``
     }
 
-    /// Updates the loaded window's restoration policy from the app configuration.
-    private func syncRestoration(_ config: Ghostty.Config) {
+    /// Updates the loaded window's restoration policy from the app configuration
+    /// and the given workspaces (the window's by default). The window is
+    /// restorable if any of its tabs is.
+    private func syncRestoration(_ workspaces: [Workspace]? = nil) {
         guard isWindowLoaded, let window else { return }
+        let tabs = (workspaces ?? workspaceModel.workspaces).flatMap(\.tabs)
         // Setting all three of these is required for restoration to work.
-        window.isRestorable = restorable && config.windowSaveState != "never"
+        window.isRestorable = derivedConfig.windowSaveState != "never"
+            && tabs.contains(where: \.isRestorable)
         window.restorationClass = TerminalWindowRestoration.self
         window.identifier = .init(String(describing: TerminalWindowRestoration.self))
     }
@@ -749,7 +753,7 @@ class TerminalController: BaseTerminalController {
         // use whatever the latest app-level config is.
         let config = ghostty.config
 
-        syncRestoration(config)
+        syncRestoration()
 
         // If we have only a single surface (no splits) and there is a default size then
         // we should resize to that default size.
@@ -1172,6 +1176,7 @@ class TerminalController: BaseTerminalController {
         let maximize: Bool
         let windowPositionX: Int16?
         let windowPositionY: Int16?
+        let windowSaveState: String
 
         init() {
             self.backgroundColor = Color(NSColor.windowBackgroundColor)
@@ -1180,6 +1185,7 @@ class TerminalController: BaseTerminalController {
             self.maximize = false
             self.windowPositionX = nil
             self.windowPositionY = nil
+            self.windowSaveState = "default"
         }
 
         init(_ config: Ghostty.Config) {
@@ -1189,6 +1195,7 @@ class TerminalController: BaseTerminalController {
             self.maximize = config.maximize
             self.windowPositionX = config.windowPositionX
             self.windowPositionY = config.windowPositionY
+            self.windowSaveState = config.windowSaveState
         }
     }
 }
