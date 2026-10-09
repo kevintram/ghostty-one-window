@@ -1,0 +1,632 @@
+# Ghostty Workspaces for macOS
+
+Status: Draft 0.6  
+Platform: macOS  
+Project type: Fork of Ghostty's native macOS application
+
+## 1. Summary
+
+This project adds lightweight workspace organization to Ghostty on macOS.
+
+A workspace is a named group of terminal tabs. A window can contain multiple
+workspaces, and each workspace can contain multiple tabs. The user selects a
+workspace from a sidebar on the left of the window, and the selected
+workspace's tabs appear in a tab strip above the terminal. The project retains
+Ghostty's existing terminal implementation, split panes, renderer,
+configuration, and macOS integrations.
+
+Tabs are not native AppKit tabs. Each application window is one `NSWindow`
+that holds the tabs of all of its workspaces. A tab is a split tree of
+terminals; only the selected tab's terminals are in the window, and the
+others keep running outside it.
+
+The project is intentionally narrow. It is not intended to become an IDE,
+terminal multiplexer, agent dashboard, browser, file manager, or general
+automation platform.
+
+## 2. Goals
+
+- Add multiple named workspaces to a Ghostty window.
+- Let each workspace own an ordered set of Ghostty tabs.
+- Present workspaces in a native macOS sidebar.
+- Show the selected workspace's tabs in a tab strip above the terminal.
+- Make switching workspaces as fast as switching tabs.
+- Preserve Ghostty's existing terminal behavior as closely as possible.
+- Support multiple application windows, each with its own workspaces.
+- Keep terminals alive when the user switches workspaces.
+- Restore workspace organization alongside Ghostty's existing window and tab
+  restoration.
+- Keep the workspace code isolated and understandable. Keeping the patch set
+  against upstream Ghostty small is no longer a goal.
+
+## 3. Non-goals
+
+The initial product will not include:
+
+- An embedded web browser.
+- A file explorer.
+- Git status or pull request integrations.
+- AI-agent-specific features.
+- A plugin system.
+- A socket API or extensive command-line automation API.
+- Cloud synchronization.
+- Cross-platform support.
+- Restoration of arbitrary live processes after the application quits.
+- Replacement of Ghostty's terminal engine, renderer, configuration format,
+  split implementation, or shell integration.
+
+## 4. Terminology
+
+### Application window
+
+A user-visible terminal window: one `NSWindow` managed by one
+`TerminalController`. It holds every tab of every one of its workspaces and
+shows one workspace, and one of its tabs, at a time.
+
+### Workspace model
+
+The window's `WorkspaceModel`: its ordered workspaces with their tabs, the
+selected workspace, each workspace's last-selected tab, and the state the
+sidebar and tab strip share.
+
+```text
+TerminalController (one NSWindow)
+├── Workspace bar (sidebar)
+├── Tab strip (selected workspace's tabs)
+├── Terminal view (the selected tab's split tree)
+└── WorkspaceModel
+    └── Workspace[]
+        └── TerminalTab[] (split trees of terminals)
+```
+
+### Workspace
+
+A named, ordered group of tabs within one application window. It does not
+own a separate terminal runtime.
+
+### Tab
+
+A `TerminalTab`: a split tree of one or more terminal surfaces, with its
+focused surface and title override. Each tab belongs to exactly one
+workspace.
+
+### Pane
+
+A Ghostty terminal surface within a tab's split tree.
+
+## 5. Product model
+
+The hierarchy is:
+
+```text
+Application
+└── TerminalController[]            (one per application window)
+    ├── Workspace bar
+    ├── Tab strip
+    └── WorkspaceModel
+        └── Workspace[]
+            └── TerminalTab[]
+                └── Pane[]
+```
+
+Each window has at least one workspace. Each workspace has at least one tab
+while it exists. Each tab has at least one terminal pane while it exists.
+
+Switching workspaces selects a tab in the target workspace. It does not
+create, destroy, or restart any terminal.
+
+## 6. Core user experience
+
+### 6.1 Sidebar
+
+The sidebar is the window's workspace bar. It is a native
+full-height split-view sidebar on the left of the window: it extends under the
+titlebar, and the window buttons sit on top of it. It contains:
+
+- An ordered list of workspaces.
+- A clear selected state for the active workspace.
+- Controls or contextual actions for creating, renaming, reordering, and
+  closing workspaces.
+
+Tabs do not appear in the sidebar. The active workspace's tabs appear in the
+tab strip (6.3).
+
+The workspace bar should use standard macOS appearance and interaction
+patterns. It is stable application chrome: switching tabs or workspaces must
+not visibly recreate, move, resize, or reset it.
+
+The workspace bar can be shown or hidden with View → Hide/Show Sidebar
+(`Command-B`) or a sidebar button in the titlebar beside the window buttons,
+which stays in place while the sidebar is collapsed. The same Liquid Glass
+control also holds a New Workspace button. Collapsing animates in
+the visible tab; the terminal column takes the freed width and the window
+keeps its frame. The sidebar never collapses on its own when the window is
+resized narrow. New windows start with it hidden; each window's visibility is
+saved with its state, so a restored or reopened window keeps its own.
+
+Its width, visibility, selection, and ordering belong to the window, not to
+an individual tab or workspace. There is one sidebar per window, so switching
+tabs or workspaces never touches it.
+
+### 6.2 Workspace selection
+
+Selecting a workspace selects that workspace's last-selected tab. If that tab
+is no longer available, its first available tab is selected. The tab strip
+then shows the selected workspace's tabs.
+
+Because this is an ordinary tab selection, the window frame, sidebar, and
+titlebar do not change, and the switch costs the same as switching tabs.
+
+Switching workspaces does not terminate, recreate, suspend, or reset any
+terminal process. Background terminal output continues to be processed using
+Ghostty's existing behavior.
+
+Selecting a tab of another workspace by any means (for example, presenting
+one of its terminals from the command palette or a notification) also
+selects that tab's workspace.
+
+### 6.3 Tab strip and tab selection
+
+The tab strip sits above the terminal, below the titlebar, and shows only the
+selected workspace's tabs, in order. Each tab is a capsule showing a terminal
+icon, its title, and a close button on hover. The tabs sit on a tinted,
+rounded track, like macOS's own tab bar. Resting tabs show only the track,
+hovered ones are tinted, and the selected one is Liquid Glass. A New Tab
+button sits past the track's end.
+
+However many tabs there are, they share the strip's width and keep
+shrinking, as in Chrome: titles shorten, then the close button's space goes
+(the selected tab shows it in place of its icon on hover), and finally only
+a shrinking icon is left. The selected tab keeps a minimum width so it stays
+findable and closable. Hovering a tab shows its full title.
+
+Like Ghostty's native tab bar, the strip is hidden while the selected
+workspace has a single tab, except while a tab is being dragged (in any
+window), when it shows over the terminal, without resizing it, to take the
+drop.
+
+Pressing a tab selects it right away. Dragging it along the strip reorders it
+live: it follows the pointer while the tabs it passes slide aside, and it
+settles into its slot on release. Pulling it out of the strip turns the drag
+into a system drag: the tab leaves the strip and a preview card of it follows
+the pointer, to be dropped on a workspace in the sidebar, on another window's
+strip, or outside every window (see "Moving tabs between workspaces"). Over a
+strip, its own or another window's, the card gives way to the tab itself,
+which joins the strip under the pointer while the tabs it passes slide aside,
+and settles into its slot when dropped. Escape, or dropping anywhere else,
+returns the tab to where it was.
+
+Middle-clicking a tab or workspace row closes it without selecting it first,
+using the same confirmation and undo behavior as the corresponding close
+button or menu item.
+
+Selecting a tab swaps its split tree into the window (see 10.3). Ghostty's
+tab navigation — `goto_tab` (index, next, previous, last), `move_tab`, Close
+Other Tabs, and Close Tabs to the Right — operates within the current
+workspace.
+
+#### Context menus
+
+Right-clicking a tab or a workspace row opens a context menu that acts on it
+without selecting it:
+
+- Tab: New Tab to the Right; Rename Tab…; Move to Workspace (the other
+  workspaces, or a New Workspace); Move to New Window; Close Tab, Close Other
+  Tabs, and Close Tabs to the Right.
+- Workspace: New Tab; Rename Workspace…; Close Workspace and Close Other
+  Workspaces.
+
+Items that would do nothing are disabled. Closing several tabs or workspaces
+asks once if any terminal has a running process, and one undo puts them all
+back, showing the tab that was shown. A new tab starts in the working
+directory of the tab it was added beside (or the workspace's current tab),
+and undoing it shows the tab that was shown before.
+
+
+### 6.4 Multiple windows
+
+The application may have multiple application windows. Each window has its own:
+
+- Workspaces and tabs.
+- Selected workspace.
+- Last-selected tab for each workspace.
+- Workspace ordering.
+- Sidebar width and visibility.
+
+Creating a new application window creates one workspace with one tab.
+
+## 7. Commands and expected behavior
+
+The default commands are below. Each is a Ghostty keybinding action, so
+`keybind` can change it, and the menus show the bound shortcut. The keys
+follow two layers: the workspace shortcuts are the tab shortcuts with
+Control in place of Command.
+
+| Command | Default shortcut | Action | Behavior |
+| --- | --- | --- | --- |
+| New Window | `Command-Shift-N` | `new_window` | Create a new application window with one workspace and one tab. |
+| Close Window | `Control-Command-W` | `close_window` | Close the application window, including every workspace in it. |
+| Close All Windows | `Command-Option-Shift-W` | `close_all_windows` | Close every window. |
+| Merge All Windows | None (Window menu) | — | Move every other window's workspaces into this one. |
+| Move Tab to New Window | None (menus) | `move_tab_to_new_window` | Move the shown tab into a new window. |
+| New Workspace | `Command-N` | `new_workspace` | Create and select a workspace containing one new tab. |
+| Close Workspace | `Command-Shift-W` | `close_workspace` | Close the selected workspace and all of its tabs (8). |
+| Rename Workspace | `Command-Shift-R` | `rename_workspace` | Rename the selected workspace in place in the sidebar. |
+| Next / Previous Workspace | `Control-Shift-]` / `[` | `next_workspace` / `previous_workspace` | Select the next or previous workspace in display order, wrapping around. |
+| Go to Workspace 1–8 / Last | `Control-1` … `8`, `Control-9` | `goto_workspace:N` / `last_workspace` | Select the Nth workspace, or the last one. |
+| Move Workspace Up / Down | None (Workspace menu) | `move_workspace:-1` / `1` | Move the selected workspace in the sidebar, wrapping around. |
+| Move Tab to Previous / Next Workspace | None | `move_tab_to_workspace:-1` / `1` | Move the shown tab to the neighboring workspace and follow it. |
+| Hide/Show Sidebar | `Command-B` | `toggle_sidebar` | Show or hide the workspace sidebar (View menu, titlebar button). |
+| New Tab | `Command-T` | `new_tab` | Create a tab in the current workspace. |
+| Close | `Command-W` | `close_surface` | Close the focused split, or the tab once it has no splits, using Ghostty's existing confirmation behavior. The next tab is chosen within the same workspace. |
+| Close Tab | None (menus) | `close_tab` | Close the shown tab with all of its splits. |
+| Rename Tab | `Command-R` | `prompt_tab_title` | Rename the shown tab in place in the strip. |
+| Next / Previous Tab | `Command-Shift-]` / `[`, `Control-Tab` / `Control-Shift-Tab` | `next_tab` / `previous_tab` | Select the next or previous tab within the current workspace. |
+| Go to Tab 1–8 / Last | `Command-1` … `8`, `Command-9` | `goto_tab:N` / `last_tab` | Select the Nth tab of the current workspace, or the last one. |
+| Move Tab Left / Right | `Control-Shift-Page Up` / `Down` | `move_tab:-1` / `1` | Move the shown tab within its workspace. |
+| Reopen Closed | `Command-Shift-T` | `reopen_closed` | Reopen the most recently closed split, tab, workspace or window (see "Reopening"). |
+
+Shortcut assignments remain subject to Ghostty's configuration and conflict
+handling. Compared with upstream Ghostty's macOS defaults, `new_window` moves
+from `Command-N` to `Command-Shift-N`, `close_window` from `Command-Shift-W`
+to `Control-Command-W`, and `close_tab` loses `Command-Option-W`.
+`Control-Shift-[`/`]` are terminal keys that the workspace bindings take
+from programs running in the terminal; few use them, and in legacy key
+encodings they're indistinguishable from `Control-[` (Escape). The
+workspace actions and `reopen_closed` are macOS-only; GTK ignores them.
+
+### Reopening
+
+`undo-timeout` defaults to 20 seconds (upstream: 5). Until a closed split,
+tab, workspace or window's undo expires, its terminals keep running, and
+Undo (`Command-Z`) or Reopen Closed (`Command-Shift-T`) brings it back as it
+was. Undo reverses the most recent action of any kind; Reopen Closed reverses
+the most recent close still undoable, even under newer actions, and pressing
+it again goes further back. Once the timeout passes, the close can't be
+reversed and Reopen Closed does nothing; no closed-item history is kept.
+
+## 8. Workspace lifecycle
+
+### Creating a workspace
+
+Creating a workspace:
+
+1. Creates a workspace with a stable UUID and no custom name.
+2. Captures the focused pane's current working directory from the active tab.
+3. Creates one tab with the captured working directory as its initial
+   working directory.
+4. Assigns the tab to the new workspace.
+5. Selects the workspace and its new tab.
+
+If the focused pane does not report a working directory, creation falls back
+to Ghostty's normal new-terminal working-directory behavior.
+
+Until it's renamed, a workspace is named after its current tab (the one
+selecting the workspace shows), following that tab's title as it changes.
+Renaming a workspace does not change terminal titles, working directories, or
+commands.
+
+Workspace names do not need to be unique within an application window.
+
+### Renaming a workspace
+
+A workspace is renamed in place in the sidebar, by double-clicking its row,
+choosing Rename Workspace… from the row's context menu, or with Rename
+Workspace (`Command-Shift-R`) for the selected workspace, which shows the
+sidebar if it's collapsed. Its name becomes a text field: Return saves it,
+and so does clicking elsewhere or switching apps; Escape cancels. Keyboard
+focus then returns to the terminal. An empty name removes the custom name, so
+the workspace is named after its current tab again. Long names are truncated
+in the sidebar.
+
+`Control-R` is left alone since shells use it for reverse history search.
+
+### Closing a workspace
+
+Closing a workspace closes all tabs assigned to it. It's chosen from the
+workspace row's context menu, or from the Workspace menu or
+`Command-Shift-W` for the selected workspace.
+
+Ghostty's existing running-process confirmation behavior must be respected.
+The operation should be all-or-cancel from the user's perspective: if closing
+requires confirmation, the user confirms closing the workspace rather than
+receiving a confusing sequence of unrelated per-tab prompts.
+
+When a workspace loses its last tab, the workspace is removed and the
+neighboring workspace (the next one, else the previous one) is selected. If
+the last workspace in an application window is closed, the application window
+closes, with Close Window's confirmation.
+
+Undoing a workspace close puts the workspace back where it was, with its
+tabs in order and its custom name, reselecting the tab that was shown if it
+was the selected workspace. Like undoing a tab close, it keeps the terminals
+alive until it expires.
+
+### Reordering workspaces
+
+Workspaces are reordered by dragging them in the sidebar, where the dragged
+row follows the pointer and the rows it passes slide aside, as in the tab
+strip. As with tabs, pressing a row selects its workspace right away.
+Reordering affects display and workspace-navigation order only.
+
+### Moving workspaces between windows
+
+Pulling a row out of the sidebar sideways turns the drag into a system drag:
+the row leaves the sidebar and a preview card of the workspace follows the
+pointer. While it's dragged, every window shows its sidebar, a collapsed one
+over the terminal without resizing it. Over a sidebar, its own or another
+window's, the card gives way to the row itself, which joins the sidebar under
+the pointer while the rows it passes slide aside, and settles into its slot
+when dropped. The workspace moves there with its tabs, name and current tab,
+and the window comes to the front showing it. If it was the source window's
+last workspace, the source window closes, merging into the destination.
+
+Dropped outside every window, the workspace gets a new window there, or if
+it's its window's only workspace, the window moves there instead. Escape, or
+dropping anywhere else, returns the row to where it was. The terminal
+processes and split trees continue without restarting. Moving a workspace
+between windows isn't undoable, and it clears the source window's undo
+history. Workspaces aren't merged: dropped over another workspace's row, a
+workspace goes in beside it, and a tab strip doesn't take one.
+
+### Moving tabs between workspaces
+
+A tab can be reassigned from one workspace to another within the same
+application window. This only moves the tab between workspaces. The terminal
+process and split tree remain unchanged.
+
+A tab is moved by dragging it out of the tab strip onto another workspace in
+the sidebar, which highlights while the tab is over it. The tab goes to the
+end of that workspace, and the selection follows it: its new workspace is
+selected with the tab. The workspace it left shows the tab's neighbor when
+switched back to. A context-menu action is a possible later addition.
+
+A tab can also be dragged to another window: dropped on that window's strip,
+it joins the selected workspace where it was dropped; dropped on one of its
+workspaces in the sidebar, it goes to the end of that workspace. Either way
+the window comes to the front showing the tab. If it was the source window's
+last tab, the source window closes, merging into the destination. Dropped
+outside every window, the tab gets a new window there, in a workspace that
+uses the source workspace's name but receives its own workspace UUID; it is
+not linked to the source workspace. The terminal process and split tree
+continue without restarting. Moving a tab between windows isn't undoable,
+and it clears the source window's undo history.
+
+If the dragged tab was the source workspace's final tab, the now-empty source
+workspace is automatically removed.
+
+## 9. Tab lifecycle
+
+### Creating a tab
+
+A new tab is added to the selected workspace, after the selected tab or at
+the end following `window-new-tab-position`, and selected. Its terminal
+configuration, working directory inheritance, and initial focus follow
+Ghostty's existing behavior. Windows that can't have tabs (see 10.4) open a
+new window instead.
+
+### Closing a tab
+
+Closing a tab uses Ghostty's existing close and process-confirmation behavior.
+
+When the visible tab closes, the tab to its right in the same workspace is
+selected, else the tab to its left. If it was the workspace's last tab, the
+neighboring workspace is selected and the workspace is removed (8). The
+window's last tab closes the window.
+
+A terminal exiting in a tab that isn't shown closes without selecting it,
+unless it needs confirmation, in which case its tab is shown first.
+
+Undoing a close puts the tab back in its place, recreating its workspace if
+the close removed it. Until the undo expires, it keeps the tab's terminals
+alive.
+
+### Reordering tabs
+
+Tabs are reordered within their workspace by dragging them in the tab strip
+or with `move_tab`.
+
+### Splits
+
+Ghostty's existing split-pane behavior remains unchanged. Workspaces group
+tabs, not individual panes.
+
+## 10. Technical architecture
+
+### 10.1 Upstream strategy
+
+The project is a fork of Ghostty. Workspace code lives in isolated files
+(`macos/Sources/Features/Workspaces/`) where practical, but changing
+Ghostty's window and tab code to fit the design is acceptable.
+
+### 10.2 Runtime ownership
+
+The application continues to use one Ghostty application/runtime instance.
+
+- `TerminalController` manages one application window and all of its tabs.
+  Its inherited `surfaceTree` is always the selected tab's split tree, so
+  Ghostty's split, focus, zoom, close, and clipboard logic works unchanged on
+  the visible tab.
+- `WorkspaceModel` holds the window's workspaces and `TerminalTab`s.
+- `Ghostty.SurfaceView` represents an individual terminal pane.
+- The quick terminal is unchanged and has no tabs.
+
+### 10.3 Tabs and switching
+
+A `TerminalTab` holds its split tree, its focused surface, and its title
+override, and publishes its title for the tab strip. The selected tab's tree
+is kept in sync with the controller's `surfaceTree`.
+
+Selecting a tab:
+
+1. Marks it selected in the model (and its workspace).
+2. Unfocuses the previous tab's surfaces and occludes them, so they stop
+   rendering.
+3. Assigns the tab's title override and split tree to the controller, which
+   puts its surfaces in the window.
+4. Focuses the tab's last focused surface.
+
+Terminals of tabs that aren't shown keep running and receiving output. The
+base controller has hooks so they're still handled:
+
+| Hook | Used for |
+| --- | --- |
+| `owns(_:)`, `allSurfaces` | Finding a surface's controller, quit and close confirmation, AppleScript, App Intents, the command palette. |
+| `revealSurface(_:)` | Selecting a surface's tab before focusing or presenting it. |
+| `revealSurfaces(of:)` | Selecting the right tab before undoing or redoing a split change. |
+| `closeHiddenSurface(_:withConfirmation:)` | A terminal in a hidden tab exiting. |
+
+Windows use `tabbingMode = .disallowed`; AppKit native tabs are never used.
+
+### 10.4 Window layout
+
+A window's content is a split view controller:
+
+- A native split-view sidebar item (full-height layout, fixed width) hosting
+  the workspace bar.
+- A detail column containing the tab strip, pinned below the titlebar's safe
+  area, and Ghostty's existing terminal container below it.
+
+The window uses a full-size content view so the sidebar extends under the
+titlebar. With a glass background, the terminal's glass covers the whole
+window and overhangs its edges, so its rim is clipped by the window rather
+than drawn inside it. The split view's per-column titlebar backgrounds are
+made transparent, so the title row is part of the same glass surface.
+
+Windows without a titlebar (`macos-titlebar-style = hidden`,
+`window-decoration = false`) keep Ghostty's plain terminal layout, have no
+tabs, and open new tabs and workspaces as new windows.
+
+The window's content size accounts for the sidebar, titlebar, and tab strip
+so that Ghostty's `window-width` and `window-height` still describe the
+terminal area.
+
+### 10.5 Tab strip
+
+The tab strip is SwiftUI, rendered once per window from the model. Renaming a
+tab (Change Tab Title…, `Command-R` by default through `prompt_tab_title`)
+edits its title in place in the strip, which shows while a tab is renamed
+even if it's the workspace's only tab.
+
+## 11. State restoration
+
+Restoration extends Ghostty's existing per-window `TerminalRestorableState`
+(version 8). The selected tab's split tree is the state's existing
+`surfaceTree`, so older state still restores as one tab. New state also
+records each workspace's name, its tabs (split tree, focused surface, title
+override), and its selected tab. The window's selected tab's tree isn't
+repeated there, since decoding a tree creates its terminals; its workspace is
+the selected one.
+
+The state also records whether the sidebar was hidden; older state without it
+gets the default, hidden. Invalid workspace state restores the selected tab
+alone rather than failing.
+
+Undoing a window close restores all of its workspaces and tabs, and its
+sidebar visibility.
+
+## 12. Process and rendering behavior
+
+Switching tabs or workspaces does not create or destroy terminal surfaces.
+Terminals of tabs that aren't shown keep running and receiving output, but
+are occluded, so they don't render.
+
+## 13. Error handling and recovery
+
+The workspace layer must favor preserving terminals over preserving metadata.
+
+- If a workspace record references a missing tab, remove the reference.
+- If a live tab has no workspace, assign it to the selected or default
+  workspace.
+- If a selected workspace or tab is missing, choose the first valid option.
+- If workspace persistence fails, continue with an in-memory default
+  workspace.
+- If sidebar construction fails, the terminal content should remain usable.
+- Workspace operations must never silently terminate terminal processes.
+
+## 14. Performance expectations
+
+The workspace feature should add negligible overhead to normal terminal
+rendering.
+
+- Switching workspaces must cost no more than switching tabs.
+- Sidebar and tab strip updates must not subscribe directly to terminal
+  output streams.
+- Tab titles and working directories should update through existing,
+  event-driven Ghostty state (a tab observes its focused surface's title).
+- Sidebar state changes should occur on the main actor.
+- Structural coordination should happen only on events such as tab creation,
+  closure, selection, movement, or restoration.
+- There is one sidebar and one tab strip per window, however many tabs it
+  has.
+
+## 15. Accessibility
+
+All workspace and tab rows must expose appropriate accessibility labels,
+selection state, and actions.
+
+Keyboard-only users must be able to:
+
+- Focus the sidebar.
+- Move between workspaces and tabs.
+- Create, rename, and close workspaces.
+- Create, move, and close tabs.
+- Return focus to the active terminal.
+
+Adding the sidebar and tab strip must not interfere with VoiceOver access to
+Ghostty's existing terminal surfaces.
+
+## 16. Implementation status
+
+Implemented:
+
+- One `NSWindow` per application window holding all of its workspaces' tabs;
+  switching swaps split trees.
+- Sidebar with workspace list and selection; a Liquid Glass titlebar control
+  with New Workspace and the sidebar toggle.
+- Tab strip with titles, selection, close on hover, and New Tab; hidden for a
+  single tab.
+- Workspace drag-to-reorder in the sidebar.
+- Tab drag-to-reorder in the strip, and moving tabs between workspaces by
+  dragging them out of the strip onto the sidebar.
+- Dragging tabs between windows, onto another window's strip or sidebar, or
+  out of every window into a new one.
+- Dragging workspaces between windows, onto another window's sidebar, or out
+  of every window into a new one.
+- Renaming tabs in place in the strip (`Command-R`), and workspaces in place
+  in the sidebar (double-click, context menu, `Command-Shift-R`).
+- Closing workspaces from the context menu or the Workspace menu, with one
+  confirmation for all of their tabs and undo.
+- Context menus for tabs and workspaces (6.3).
+- The keyboard shortcuts in 7, as Ghostty keybinding actions, including
+  Reopen Closed within a 20-second `undo-timeout`, and Merge All Windows.
+- Per-workspace tab navigation, move-tab, Close Other Tabs, and Close Tabs to
+  the Right.
+- Closing tabs and workspaces with in-workspace next-tab selection; terminals
+  exiting in hidden tabs.
+- Undo of closing tabs and windows.
+- Restoration of workspaces and tabs.
+- Collapsible sidebar: View → Hide/Show Sidebar (`Command-B`) and a titlebar
+  sidebar button; hidden in new windows, and saved per window for
+  restoration and undo.
+- AppleScript windows and tabs map to windows and `TerminalTab`s.
+- Terminals in hidden tabs: bells, notifications (clicking one selects its
+  tab), `set_tab_title`, and child-exit messages.
+- `move_tab_to_new_window` moves a tab (the same `TerminalTab`, with its
+  focus and title) into a new window, in a workspace named after the one it
+  left. It isn't undoable, and it clears the source window's undo history,
+  whose entries for the tab would act on the wrong window.
+
+Not yet implemented:
+
+- Dragging a tab that's alone in its workspace (its strip is hidden).
+- Per-tab colors (the tab color is per window) and bell indicators in the tab
+  strip.
+- `prompt_tab_title` targeted at a hidden terminal (it renames the shown tab);
+  split actions on hidden terminals through AppleScript.
+- Adjustable sidebar width.
+- Workspace commands as Ghostty actions.
+- Removing Ghostty's now unused native tab code (tab bar accessories, the
+  `macos-titlebar-style = tabs` window styles, native tab context menus).
+- Native fullscreen and non-native titlebar styles have not been verified.
+- Accessibility review.

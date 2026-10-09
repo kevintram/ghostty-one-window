@@ -100,6 +100,11 @@ struct NewTerminalIntent: AppIntent {
             parent = nil
         }
 
+        // The parent's window, which a parent in a tab that isn't shown
+        // doesn't have itself.
+        let parentController = parent.flatMap { BaseTerminalController.controller(owning: $0) }
+        let parentWindow = parent?.window ?? parentController?.window
+
         defer {
             if !NSApp.isActive {
                 NSApp.activate(ignoringOtherApps: true)
@@ -110,25 +115,29 @@ struct NewTerminalIntent: AppIntent {
             let newController = TerminalController.newWindow(
                 ghostty,
                 withBaseConfig: config,
-                withParent: parent?.window)
+                withParent: parentWindow)
             if let view = newController.surfaceTree.root?.leftmostLeaf() {
                 return .result(value: await TerminalEntity(view: view))
             }
 
         case .tab:
+            // The new tab goes beside the parent, in its workspace.
+            if let parent { parentController?.revealSurface(parent) }
             let newController = TerminalController.newTab(
                 ghostty,
-                from: parent?.window,
+                from: parentWindow,
                 withBaseConfig: config)
             if let view = newController?.surfaceTree.root?.leftmostLeaf() {
                 return .result(value: await TerminalEntity(view: view))
             }
 
         case .splitLeft, .splitRight, .splitUp, .splitDown:
-            guard let parent,
-                  let controller = parent.window?.windowController as? BaseTerminalController else {
+            guard let parent, let controller = parentController else {
                 throw GhosttyIntentError.surfaceNotFound
             }
+
+            // Splits are made in the shown tab.
+            controller.revealSurface(parent)
 
             if let view = controller.newSplit(
                 at: parent,

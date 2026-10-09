@@ -110,6 +110,10 @@ class AppDelegate: NSObject,
     /// The global undo manager for app-level state such as window restoration.
     lazy var undoManager = ExpiringUndoManager()
 
+    /// Menu items added in code (see `installMenuItems`), with the
+    /// Ghostty action whose keybinding they show.
+    var codeMenuShortcuts: [(action: String, item: NSMenuItem)] = []
+
     /// The current state of the quick terminal.
     private var quickTerminalControllerState: QuickTerminalState = .uninitialized
 
@@ -237,6 +241,8 @@ class AppDelegate: NSObject,
 
         // This registers the Ghostty => Services menu to exist.
         NSApp.servicesMenu = menuServices
+
+        installMenuItems()
 
         // Setup a local event monitor for app-level keyboard shortcuts. See
         // localEventHandler for more info why.
@@ -574,6 +580,17 @@ class AppDelegate: NSObject,
         }
     }
 
+    /// The standard text editing action for Command-X, -C or -V.
+    private static func textEditingAction(for event: NSEvent) -> Selector? {
+        guard event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else { return nil }
+        switch event.charactersIgnoringModifiers {
+        case "x": return #selector(NSText.cut(_:))
+        case "c": return #selector(NSText.copy(_:))
+        case "v": return #selector(NSText.paste(_:))
+        default: return nil
+        }
+    }
+
     private func localEventKeyDown(_ event: NSEvent) -> NSEvent? {
         // If the tab overview is visible and escape is pressed, close it.
         // This can't POSSIBLY be right and is probably a FirstResponder problem
@@ -584,6 +601,16 @@ class AppDelegate: NSObject,
            let tabGroup = window.tabGroup,
            tabGroup.isOverviewVisible {
             window.toggleTabOverview(nil)
+            return nil
+        }
+
+        // Text fields (e.g. renaming a tab or workspace) rely on the Edit
+        // menu for Cut, Copy and Paste, but those items have no shortcuts:
+        // their Ghostty bindings are performable, and the menu only shows
+        // bindings that aren't. So send the standard actions ourselves.
+        if NSApp.keyWindow?.firstResponder is NSText,
+           let action = Self.textEditingAction(for: event),
+           NSApp.sendAction(action, to: nil, from: nil) {
             return nil
         }
 
@@ -657,7 +684,6 @@ class AppDelegate: NSObject,
 
     @MainActor @objc private func keyboardSelectionDidChange(_ notification: Notification) {
         syncMenuShortcuts(ghostty.config)
-        TerminalController.all.forEach { $0.relabelTabs() }
     }
 
     @objc private func ghosttyBellDidRing(_ notification: Notification) {
@@ -802,7 +828,6 @@ class AppDelegate: NSObject,
         DispatchQueue.main.async {
             self.syncMenuShortcuts(config)
         }
-        TerminalController.all.forEach { $0.relabelTabs() }
 
         // Update our badge since config can change what we show.
         syncDockBadge()
@@ -922,7 +947,7 @@ class AppDelegate: NSObject,
 
     func findSurface(forUUID uuid: UUID) -> Ghostty.SurfaceView? {
         for c in TerminalController.all {
-            for view in c.surfaceTree where view.id == uuid {
+            for view in c.allSurfaces where view.id == uuid {
                 return view
             }
         }
@@ -1033,6 +1058,11 @@ class AppDelegate: NSObject,
 
     @IBAction func redo(_ sender: Any?) {
         undoManager.redo()
+    }
+
+    /// Reopens the most recently closed split, tab, workspace or window.
+    @IBAction func reopenClosed(_ sender: Any?) {
+        undoManager.reopenLastClosed()
     }
 
     private struct DerivedConfig {
@@ -1154,7 +1184,7 @@ extension AppDelegate {
     }
 
     /// Sync all of our menu item keyboard shortcuts with the Ghostty configuration.
-    @MainActor private func syncMenuShortcuts(_ config: Ghostty.Config) {
+    @MainActor func syncMenuShortcuts(_ config: Ghostty.Config) {
         guard ghostty.readiness == .ready else { return }
 
         menuShortcutManager.reset()
@@ -1214,6 +1244,10 @@ extension AppDelegate {
         syncMenuShortcut(config, action: "toggle_command_palette", menuItem: self.menuCommandPalette)
 
         syncMenuShortcut(config, action: "toggle_secure_input", menuItem: self.menuSecureInput)
+
+        for (action, item) in codeMenuShortcuts {
+            syncMenuShortcut(config, action: action, menuItem: item)
+        }
 
         // This menu item is NOT synced with the configuration because it disables macOS
         // global fullscreen keyboard shortcut. The shortcut in the Ghostty config will continue
@@ -1310,6 +1344,9 @@ extension AppDelegate: NSMenuItemValidation {
                 item.title = "Redo"
             }
             return undoManager.canRedo
+
+        case #selector(reopenClosed(_:)):
+            return undoManager.canReopenClosed
 
         default:
             return true

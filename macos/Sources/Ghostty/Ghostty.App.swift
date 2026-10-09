@@ -555,7 +555,9 @@ extension Ghostty {
             guard let uuidString = userInfo["surface"] as? String,
                   let uuid = UUID(uuidString: uuidString),
                   let surface = delegate?.findSurface(forUUID: uuid),
-                  let window = surface.window else { return false }
+                  // A surface in a tab that isn't shown has no window of its own.
+                  let window = surface.window ?? BaseTerminalController.controller(owning: surface)?.window
+            else { return false }
 
             // If we don't require focus then we're good!
             let requireFocus = userInfo["requireFocus"] as? Bool ?? true
@@ -626,6 +628,72 @@ extension Ghostty {
 
             case GHOSTTY_ACTION_GOTO_TAB:
                 return gotoTab(app, target: target, tab: action.action.goto_tab)
+
+            case GHOSTTY_ACTION_NEW_WORKSPACE:
+                return performWorkspaceAction(target: target, name: "new workspace") {
+                    $0.newWorkspace(nil)
+                    return true
+                }
+
+            case GHOSTTY_ACTION_CLOSE_WORKSPACE:
+                return performWorkspaceAction(target: target, name: "close workspace") {
+                    $0.closeWorkspace(nil)
+                    return true
+                }
+
+            case GHOSTTY_ACTION_RENAME_WORKSPACE:
+                return performWorkspaceAction(target: target, name: "rename workspace") {
+                    $0.renameWorkspace(nil)
+                    return true
+                }
+
+            case GHOSTTY_ACTION_GOTO_WORKSPACE:
+                let workspace = action.action.goto_workspace
+                return performWorkspaceAction(target: target, name: "goto workspace") { controller in
+                    switch workspace {
+                    case GHOSTTY_GOTO_TAB_PREVIOUS: controller.selectAdjacentWorkspace(offset: -1)
+                    case GHOSTTY_GOTO_TAB_NEXT: controller.selectAdjacentWorkspace(offset: 1)
+                    case GHOSTTY_GOTO_TAB_LAST: controller.selectLastWorkspace()
+                    default: controller.selectWorkspace(number: Int(workspace.rawValue))
+                    }
+                }
+
+            case GHOSTTY_ACTION_WORKSPACE_SWITCHER:
+                let direction = action.action.workspace_switcher
+                return performWorkspaceAction(target: target, name: "workspace switcher") { controller in
+                    switch direction {
+                    case GHOSTTY_WORKSPACE_SWITCHER_PREVIOUS:
+                        return controller.cycleWorkspaceSwitcher(offset: 1)
+                    case GHOSTTY_WORKSPACE_SWITCHER_NEXT:
+                        return controller.cycleWorkspaceSwitcher(offset: -1)
+                    default:
+                        assertionFailure()
+                        return false
+                    }
+                }
+
+            case GHOSTTY_ACTION_MOVE_WORKSPACE:
+                let amount = action.action.move_workspace.amount
+                return performWorkspaceAction(target: target, name: "move workspace") {
+                    $0.moveSelectedWorkspace(by: amount)
+                }
+
+            case GHOSTTY_ACTION_MOVE_TAB_TO_WORKSPACE:
+                let amount = action.action.move_tab_to_workspace.amount
+                return performWorkspaceAction(target: target, name: "move tab to workspace") {
+                    $0.moveSelectedTab(toWorkspaceBy: amount)
+                }
+
+            case GHOSTTY_ACTION_TOGGLE_SIDEBAR:
+                return performWorkspaceAction(target: target, name: "toggle sidebar") {
+                    $0.workspaceModel.isSidebarCollapsed.toggle()
+                    return true
+                }
+
+            case GHOSTTY_ACTION_REOPEN_CLOSED:
+                return MainActor.assumeIsolated {
+                    (NSApp.delegate as? AppDelegate)?.undoManager.reopenLastClosed() ?? false
+                }
 
             case GHOSTTY_ACTION_GOTO_SPLIT:
                 return gotoSplit(app, target: target, direction: action.action.goto_split)
@@ -1267,7 +1335,7 @@ extension Ghostty {
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
                     // See gotoTab for notes on this check.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    guard hasOtherTabs(surfaceView) else { return false }
 
                     NotificationCenter.default.post(
                         name: .ghosttyMoveTab,
@@ -1284,6 +1352,49 @@ extension Ghostty {
                 return true
         }
 
+        /// Performs a workspace action on the window of the target surface,
+        /// if that window has workspaces. Returns false if it doesn't, or if
+        /// `perform` did nothing.
+        private static func performWorkspaceAction(
+            target: ghostty_target_s,
+            name: String,
+            _ perform: @MainActor (TerminalController) -> Bool
+        ) -> Bool {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                Ghostty.logger.warning("\(name, privacy: .public) does nothing with an app target")
+                return false
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface,
+                      let surfaceView = self.surfaceView(from: surface) else { return false }
+
+                // Actions are performed on the main thread.
+                return MainActor.assumeIsolated {
+                    guard let controller = BaseTerminalController.controller(owning: surfaceView) as? TerminalController,
+                          controller.supportsTabs else { return false }
+                    return perform(controller)
+                }
+
+            default:
+                assertionFailure()
+                return false
+            }
+        }
+
+        /// Whether the surface's workspace has other tabs to go or move to.
+        /// Tabs are drawn by the window rather than being native tabs, so
+        /// this asks its controller rather than its tab group.
+        private static func hasOtherTabs(_ surfaceView: SurfaceView) -> Bool {
+            // Actions are performed on the main thread.
+            MainActor.assumeIsolated {
+                guard let controller = BaseTerminalController.controller(owning: surfaceView) as? TerminalController else {
+                    return false
+                }
+                return controller.workspaceModel.tabs.count > 1
+            }
+        }
+
         private static func moveTabToNewWindow(
             _ app: ghostty_app_t,
             target: ghostty_target_s) -> Bool {
@@ -1296,11 +1407,14 @@ extension Ghostty {
                     guard let surface = target.target.surface else { return false }
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
-                    // See gotoTab for notes on this check. A lone tab is already
-                    // a window of its own, so there is nothing to move.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
-
-                    surfaceView.window?.moveTabToNewWindow(nil)
+                    // See gotoTab for notes on this check. A window's only tab
+                    // is already a window of its own, so there is nothing to move.
+                    let moved = MainActor.assumeIsolated {
+                        guard let controller = BaseTerminalController.controller(owning: surfaceView) as? TerminalController,
+                              let tab = controller.workspaceModel.tab(owning: surfaceView) else { return false }
+                        return controller.moveTabToNewWindow(tab)
+                    }
+                    guard moved else { return false }
 
                 default:
                     assertionFailure()
@@ -1324,7 +1438,7 @@ extension Ghostty {
 
                     // Similar to goto_split (see comment there) about our performability,
                     // we should make this more accurate later.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    guard hasOtherTabs(surfaceView) else { return false }
 
                     NotificationCenter.default.post(
                         name: Notification.ghosttyGotoTab,
@@ -1843,11 +1957,11 @@ extension Ghostty {
                 let titleOverride = title.isEmpty ? nil : title
                 guard let surface = target.target.surface else { return false }
                 guard let surfaceView = self.surfaceView(from: surface) else { return false }
-                guard let window = surfaceView.window,
-                      let controller = window.windowController as? BaseTerminalController
-                else { return false }
-                controller.titleOverride = titleOverride
-                return true
+                return MainActor.assumeIsolated {
+                    guard let controller = BaseTerminalController.controller(owning: surfaceView) else { return false }
+                    controller.setTitleOverride(titleOverride, for: surfaceView)
+                    return true
+                }
 
             default:
                 assertionFailure()
@@ -1864,9 +1978,11 @@ extension Ghostty {
             case GHOSTTY_TARGET_SURFACE:
                 guard let surface = target.target.surface else { return false }
                 guard let surfaceView = self.surfaceView(from: surface) else { return false }
-                // We handle this when the window is visible and timetime_ms is greater than 0,
-                // which will rule out exit codes on launch
-                guard surfaceView.window != nil, v.timetime_ms > 0 else { return false }
+                // We handle this when the surface belongs to a window (also when
+                // its tab isn't shown) and timetime_ms is greater than 0, which will
+                // rule out exit codes on launch
+                let owned = MainActor.assumeIsolated { BaseTerminalController.controller(owning: surfaceView) != nil }
+                guard owned, v.timetime_ms > 0 else { return false }
                 guard let config = (NSApplication.shared.delegate as? AppDelegate)?.ghostty.config else { return false }
                 surfaceView.setChildExitedMessage(.init(v, threshold: config.abnormalCommandExitRuntime))
                 return true

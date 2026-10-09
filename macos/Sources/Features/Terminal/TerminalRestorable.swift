@@ -58,7 +58,7 @@ extension TerminalRestorable {
 
 /// The state stored for terminal window restoration.
 final class TerminalRestorableState: TerminalRestorable {
-    static var version: Int { 7 }
+    static var version: Int { 8 }
     static var minimumVersion: Int { 5 }
 
     var focusedSurface: String? {
@@ -77,6 +77,18 @@ final class TerminalRestorableState: TerminalRestorable {
         internalState.titleOverride
     }
 
+    typealias WorkspaceState = InternalState<Ghostty.SurfaceView>.WorkspaceState
+
+    var workspaces: [WorkspaceState]? {
+        internalState.workspaces
+    }
+    var sidebarCollapsed: Bool? {
+        internalState.sidebarCollapsed
+    }
+    var sidebarWidth: CGFloat? {
+        internalState.sidebarWidth
+    }
+
     /// Internal State we use to perform unit tests
     ///
     /// Since we can't really change the type of `TerminalRestorableState`
@@ -84,7 +96,7 @@ final class TerminalRestorableState: TerminalRestorable {
     /// we use an internal type to perform migration and tests
     private let internalState: InternalState<Ghostty.SurfaceView>
 
-    init(from controller: TerminalController) {
+    @MainActor init(from controller: TerminalController) {
         internalState = .init(from: controller)
     }
 
@@ -170,6 +182,16 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
 
         // Restore the tab title override
         c.titleOverride = state.titleOverride
+
+        // Restore the window's other tabs, and its sidebar, before the
+        // window shows so it doesn't animate.
+        c.restoreWorkspaces(state.workspaces)
+        if let collapsed = state.sidebarCollapsed {
+            c.workspaceModel.isSidebarCollapsed = collapsed
+        }
+        if let width = state.sidebarWidth {
+            c.workspaceModel.sidebarWidth = WorkspaceModel.clampedSidebarWidth(width)
+        }
 
         // Setup our restored state on the controller
         // Find the focused surface in surfaceTree

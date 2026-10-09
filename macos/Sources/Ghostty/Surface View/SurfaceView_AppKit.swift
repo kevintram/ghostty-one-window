@@ -1821,7 +1821,12 @@ extension Ghostty {
         func handleUserNotification(notification: UNNotification, focus: Bool) {
             let id = notification.request.identifier
             guard self.notificationIdentifiers.remove(id) != nil else { return }
-            if focus {
+            guard focus else { return }
+
+            // The controller shows the surface's tab first if it isn't shown.
+            if let controller = BaseTerminalController.controller(owning: self) {
+                controller.focusSurface(self)
+            } else {
                 self.window?.makeKeyAndOrderFront(self)
                 Ghostty.moveFocus(to: self)
             }

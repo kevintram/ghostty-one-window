@@ -364,6 +364,35 @@ pub const Action = union(Key) {
     /// split or the window is fullscreen.
     resize_window: ResizeWindow,
 
+    /// Open a new workspace in the target's window.
+    new_workspace,
+
+    /// Close the target's workspace.
+    close_workspace,
+
+    /// Rename the target's workspace.
+    rename_workspace,
+
+    /// Jump to a specific workspace, like `goto_tab` for tabs. Must handle
+    /// the scenario that the workspace value is invalid.
+    goto_workspace: GotoTab,
+
+    /// Cycle through workspaces in most-recently-used order.
+    workspace_switcher: WorkspaceSwitcher,
+
+    /// Move the target's workspace by a relative offset, wrapping around.
+    move_workspace: MoveTab,
+
+    /// Move the target's tab to the workspace a relative offset away,
+    /// wrapping around.
+    move_tab_to_workspace: MoveTab,
+
+    /// Show or hide the workspace sidebar of the target's window.
+    toggle_sidebar,
+
+    /// Reopen the most recently closed split, tab, workspace or window.
+    reopen_closed,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -436,6 +465,15 @@ pub const Action = union(Key) {
         copy_title_to_clipboard,
         move_tab_to_new_window,
         resize_window,
+        new_workspace,
+        close_workspace,
+        rename_workspace,
+        goto_workspace,
+        workspace_switcher,
+        move_workspace,
+        move_tab_to_workspace,
+        toggle_sidebar,
+        reopen_closed,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -584,6 +622,19 @@ pub const GotoTab = enum(c_int) {
     // test "ghostty.h GotoTab" {
     //     try lib.checkGhosttyHEnum(GotoTab, "GHOSTTY_GOTO_TAB_");
     // }
+};
+
+/// Direction to move through the most-recently-used workspace switcher.
+pub const WorkspaceSwitcher = enum(c_int) {
+    previous,
+    next,
+
+    test "ghostty.h WorkspaceSwitcher" {
+        try lib.checkGhosttyHEnum(
+            WorkspaceSwitcher,
+            "GHOSTTY_WORKSPACE_SWITCHER_",
+        );
+    }
 };
 
 /// The fullscreen mode to toggle to if we're moving to fullscreen.

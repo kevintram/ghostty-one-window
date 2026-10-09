@@ -2310,6 +2310,9 @@ keybind: Keybinds = .{},
 ///     or at the end if there are no focused tabs.
 ///
 ///   * `end` - Insert the new tab at the end of the tab list.
+///
+/// On macOS, new workspaces are placed the same way in the sidebar: after
+/// the selected workspace, or at the end.
 @"window-new-tab-position": WindowNewTabPosition = .current,
 
 /// Whether to show the tab bar.
@@ -2688,7 +2691,9 @@ keybind: Keybinds = .{},
 /// time, the operation will be removed from the undo stack and
 /// cannot be undone.
 ///
-/// The default value is 5 seconds.
+/// The default value is 20 seconds. A closed split, tab, workspace or
+/// window keeps its terminals running until then, so it can come back
+/// as it was (see `undo` and `reopen_closed`).
 ///
 /// This timeout applies per operation, meaning that if you perform
 /// multiple operations, each operation will have its own timeout.
@@ -2730,7 +2735,7 @@ keybind: Keybinds = .{},
 /// effect.
 ///
 /// Available since: 1.2.0
-@"undo-timeout": Duration = .{ .duration = 5 * std.time.ns_per_s },
+@"undo-timeout": Duration = .{ .duration = 20 * std.time.ns_per_s },
 
 /// The position of the "quick" terminal window. To learn more about the
 /// quick terminal, see the documentation for the `toggle_quick_terminal`
@@ -7149,10 +7154,13 @@ pub const Keybinds = struct {
                 .{ .jump_to_prompt = 1 },
             );
 
-            // Mac windowing
+            // Mac windowing. Windows hold workspaces, which hold tabs:
+            // Cmd+N makes a workspace, Cmd+Shift+W closes one, and the
+            // window takes Cmd+Shift+N and Ctrl+Cmd+W instead. Cmd+W closes
+            // one split at a time, then the tab, so Close Tab has no key.
             try self.set.put(
                 alloc,
-                .{ .key = .{ .unicode = 'n' }, .mods = .{ .super = true } },
+                .{ .key = .{ .unicode = 'n' }, .mods = .{ .super = true, .shift = true } },
                 .{ .new_window = {} },
             );
             try self.set.put(
@@ -7162,12 +7170,7 @@ pub const Keybinds = struct {
             );
             try self.set.put(
                 alloc,
-                .{ .key = .{ .unicode = 'w' }, .mods = .{ .super = true, .alt = true } },
-                .{ .close_tab = .this },
-            );
-            try self.set.put(
-                alloc,
-                .{ .key = .{ .unicode = 'w' }, .mods = .{ .super = true, .shift = true } },
+                .{ .key = .{ .unicode = 'w' }, .mods = .{ .super = true, .ctrl = true } },
                 .{ .close_window = {} },
             );
             try self.set.put(
@@ -7182,6 +7185,11 @@ pub const Keybinds = struct {
             );
             try self.set.put(
                 alloc,
+                .{ .key = .{ .unicode = 'r' }, .mods = .{ .super = true } },
+                .{ .prompt_tab_title = {} },
+            );
+            try self.set.put(
+                alloc,
                 .{ .key = .{ .unicode = '[' }, .mods = .{ .super = true, .shift = true } },
                 .{ .previous_tab = {} },
             );
@@ -7190,6 +7198,85 @@ pub const Keybinds = struct {
                 .{ .key = .{ .unicode = ']' }, .mods = .{ .super = true, .shift = true } },
                 .{ .next_tab = {} },
             );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 't' }, .mods = .{ .super = true, .shift = true } },
+                .{ .reopen_closed = {} },
+            );
+
+            // Workspaces: like the tab shortcuts, with Control in place of
+            // Command.
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'n' }, .mods = .{ .super = true } },
+                .{ .new_workspace = {} },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'w' }, .mods = .{ .super = true, .shift = true } },
+                .{ .close_workspace = {} },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'r' }, .mods = .{ .super = true, .shift = true } },
+                .{ .rename_workspace = {} },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = '[' }, .mods = .{ .ctrl = true, .shift = true } },
+                .{ .previous_workspace = {} },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = ']' }, .mods = .{ .ctrl = true, .shift = true } },
+                .{ .next_workspace = {} },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'b' }, .mods = .{ .super = true } },
+                .{ .toggle_sidebar = {} },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .physical = .backquote }, .mods = .{ .ctrl = true } },
+                .{ .workspace_switcher = .previous },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .physical = .backquote }, .mods = .{ .ctrl = true, .shift = true } },
+                .{ .workspace_switcher = .next },
+            );
+            {
+                // Like Cmd+1-8 and Cmd+9 for tabs, both the physical and
+                // the unicode digit keys, for layouts whose digit keys don't
+                // type digits (e.g. AZERTY).
+                const mods: inputpkg.Mods = .{ .ctrl = true };
+                inline for (1..9) |i| {
+                    try self.set.put(
+                        alloc,
+                        .{
+                            .key = .{ .physical = @field(inputpkg.Key, std.fmt.comptimePrint("digit_{d}", .{i})) },
+                            .mods = mods,
+                        },
+                        .{ .goto_workspace = i },
+                    );
+                    try self.set.put(
+                        alloc,
+                        .{ .key = .{ .unicode = '0' + i }, .mods = mods },
+                        .{ .goto_workspace = i },
+                    );
+                }
+                try self.set.put(
+                    alloc,
+                    .{ .key = .{ .physical = .digit_9 }, .mods = mods },
+                    .{ .last_workspace = {} },
+                );
+                try self.set.put(
+                    alloc,
+                    .{ .key = .{ .unicode = '9' }, .mods = mods },
+                    .{ .last_workspace = {} },
+                );
+            }
             try self.set.put(
                 alloc,
                 .{ .key = .{ .unicode = 'd' }, .mods = .{ .super = true } },
