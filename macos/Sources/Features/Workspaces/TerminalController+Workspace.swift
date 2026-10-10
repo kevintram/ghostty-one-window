@@ -152,7 +152,9 @@ extension TerminalController {
               let id = id ?? workspaceModel.selectedWorkspaceID,
               workspaceModel.workspaceIndex(of: id) != nil else { return nil }
 
-        let tab = TerminalTab(surfaceTree: .init(view: Ghostty.SurfaceView(app, baseConfig: config)))
+        let tab = TerminalTab(
+            surfaceTree: .init(view: Ghostty.SurfaceView(app, baseConfig: config)),
+            isRestorable: (config?.command ?? "") == "")
         var index: Int?
         if let anchor, let location = workspaceModel.location(of: anchor) {
             index = location.tab + 1
