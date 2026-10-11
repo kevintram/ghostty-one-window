@@ -83,7 +83,7 @@ private struct TabStrip: View {
                     .zIndex(phase(of: tab) == nil ? 0 : 1)
                     // Clicks in the title field while renaming position the cursor.
                     .gesture(reorderGesture(for: tab), including: isRenaming(tab) ? .subviews : .all)
-                    .contextMenu { menu(for: tab) }
+                    .contextMenu { TabContextMenu(tab: tab, model: model, controller: controller) }
                     // A tab from another window isn't this strip's until dropped.
                     .allowsHitTesting(tab !== model.incomingTab)
                 }
@@ -178,47 +178,6 @@ private struct TabStrip: View {
         var lengths = Array(repeating: widths.other + Self.spacing, count: count)
         if lengths.indices.contains(from) { lengths[from] = widths.selected + Self.spacing }
         return ReorderSlots(lengths: lengths)
-    }
-
-    /// The tab's context menu. It acts on the tab, which it doesn't select.
-    @ViewBuilder
-    private func menu(for tab: TerminalTab) -> some View {
-        let otherWorkspaces = model.workspaces.filter { !$0.tabs.contains { $0 === tab } }
-
-        Button("New Tab to the Right") {
-            controller.value?.newTab(after: tab)
-        }
-        Divider()
-        Button("Rename Tab…") {
-            controller.value?.beginRenamingTab(tab)
-        }
-        Menu("Move to Workspace") {
-            ForEach(otherWorkspaces) { workspace in
-                Button(workspace.name) {
-                    controller.value?.moveTab(tab, toWorkspace: workspace.id)
-                }
-            }
-            if !otherWorkspaces.isEmpty { Divider() }
-            Button("New Workspace") {
-                controller.value?.moveTabToNewWorkspace(tab)
-            }
-        }
-        Button("Move to New Window") {
-            controller.value?.moveTabToNewWindow(tab)
-        }
-        .disabled(model.allTabs.count < 2)
-        Divider()
-        Button("Close Tab") {
-            controller.value?.close(tab: tab)
-        }
-        Button("Close Other Tabs") {
-            controller.value?.closeOtherTabs(than: tab)
-        }
-        .disabled(model.otherTabs(than: tab).isEmpty)
-        Button("Close Tabs to the Right") {
-            controller.value?.closeTabs(rightOf: tab)
-        }
-        .disabled(model.tabs(rightOf: tab).isEmpty)
     }
 
     // MARK: Reordering
@@ -405,6 +364,61 @@ extension TabStrip: DropDelegate {
             let center = Self.inset + slots.start(of: from) + (slots.lengths[from] - Self.spacing) / 2
             model.tabDrag = Drag(id: tab.id, offset: slots.clamped(info.location.x - center, from: from))
         }
+    }
+}
+
+/// A tab's context menu, in the tab strip or the sidebar. It acts on the
+/// tab, which it doesn't select.
+struct TabContextMenu: View {
+    let tab: TerminalTab
+    let model: WorkspaceModel
+    let controller: Weak<TerminalController>
+
+    /// Whether the menu is for a tab listed down the sidebar, rather than
+    /// across the strip. Renaming it renames it there.
+    var inSidebar = false
+
+    private var direction: TerminalController.TabDirection {
+        inSidebar ? .below : .right
+    }
+
+    var body: some View {
+        let otherWorkspaces = model.workspaces.filter { !$0.tabs.contains { $0 === tab } }
+
+        Button("New Tab \(direction.title)") {
+            controller.value?.newTab(after: tab)
+        }
+        Divider()
+        Button("Rename Tab…") {
+            controller.value?.beginRenamingTab(tab, inSidebar: inSidebar)
+        }
+        Menu("Move to Workspace") {
+            ForEach(otherWorkspaces) { workspace in
+                Button(workspace.name) {
+                    controller.value?.moveTab(tab, toWorkspace: workspace.id)
+                }
+            }
+            if !otherWorkspaces.isEmpty { Divider() }
+            Button("New Workspace") {
+                controller.value?.moveTabToNewWorkspace(tab)
+            }
+        }
+        Button("Move to New Window") {
+            controller.value?.moveTabToNewWindow(tab)
+        }
+        .disabled(model.allTabs.count < 2)
+        Divider()
+        Button("Close Tab") {
+            controller.value?.close(tab: tab)
+        }
+        Button("Close Other Tabs") {
+            controller.value?.closeOtherTabs(than: tab)
+        }
+        .disabled(model.otherTabs(than: tab).isEmpty)
+        Button("Close Tabs \(direction.title)") {
+            controller.value?.closeTabs(after: tab, direction: direction)
+        }
+        .disabled(model.tabs(rightOf: tab).isEmpty)
     }
 }
 

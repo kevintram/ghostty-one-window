@@ -951,7 +951,7 @@ class TerminalController: BaseTerminalController {
 
     @IBAction func closeTabsOnTheRight(_ sender: Any?) {
         guard let selectedTab else { return }
-        closeTabs(rightOf: selectedTab)
+        closeTabs(after: selectedTab)
     }
 
     @IBAction func returnToDefaultSize(_ sender: Any?) {

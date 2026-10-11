@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A title being edited in place: a tab's in the tab strip, or a
+/// A title being edited in place: a tab's in the tab strip or sidebar, or a
 /// workspace's in the sidebar. Return saves it, and so does leaving it:
 /// clicking elsewhere, or the window losing key status when switching apps,
 /// which ends the rename and removes the field. Escape cancels.

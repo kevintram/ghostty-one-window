@@ -137,10 +137,19 @@ final class WorkspaceModel: ObservableObject {
 
     /// What's being renamed in place, one thing at a time: a tab in the tab
     /// strip (which shows while it is, even for a single tab), or a
-    /// workspace in the sidebar.
+    /// workspace or tab in the sidebar.
     enum Renaming: Equatable {
         case tab(UUID)
         case workspace(UUID)
+        case sidebarTab(UUID)
+
+        /// The tab being renamed, wherever it is.
+        var tabID: UUID? {
+            switch self {
+            case .tab(let id), .sidebarTab(let id): id
+            case .workspace: nil
+            }
+        }
     }
 
     @Published var renaming: Renaming?
@@ -325,10 +334,8 @@ final class WorkspaceModel: ObservableObject {
         guard let index = workspaceIndex(of: id) else { return }
         let workspace = workspaces.remove(at: index)
         forgetWorkspace(id)
-        switch renaming {
-        case .workspace(id): renaming = nil
-        case .tab(let tab) where workspace.tabs.contains(where: { $0.id == tab }): renaming = nil
-        default: break
+        if renaming == .workspace(id) || workspace.tabs.contains(where: { $0.id == renaming?.tabID }) {
+            renaming = nil
         }
         if workspaceDrag?.id == id { workspaceDrag = nil }
     }
@@ -350,7 +357,7 @@ final class WorkspaceModel: ObservableObject {
             workspaces.remove(at: location.workspace)
             forgetWorkspace(workspaceID)
         }
-        if renaming == .tab(tab.id) { renaming = nil }
+        if renaming?.tabID == tab.id { renaming = nil }
         if tabDrag?.id == tab.id { tabDrag = nil }
     }
 

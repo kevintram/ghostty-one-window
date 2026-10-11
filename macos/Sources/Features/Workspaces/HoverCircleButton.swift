@@ -34,19 +34,27 @@ struct HoverCircleButtonStyle: ButtonStyle {
 /// the glyph, so the × can sit flush with an edge while its hover circle
 /// extends past it.
 struct HoverCloseButton: View {
+    /// The ×'s point size and its hover circle's diameter.
+    let glyphSize: CGFloat
+    let circleSize: CGFloat
     let action: () -> Void
+
+    init(glyphSize: CGFloat = 9, circleSize: CGFloat = 16, action: @escaping () -> Void) {
+        self.glyphSize = glyphSize
+        self.circleSize = circleSize
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .semibold))
-                .frame(width: Self.circleSize, height: Self.circleSize)
+                .font(.system(size: glyphSize, weight: .semibold))
+                .frame(width: circleSize, height: circleSize)
         }
         .buttonStyle(HoverCircleButtonStyle())
-        .padding(-Self.circleOverhang)
+        .padding(-circleOverhang)
     }
 
-    /// The hover circle, and how far it extends past the ×.
-    private static let circleSize: CGFloat = 16
-    private static let circleOverhang: CGFloat = 4
+    /// How far the hover circle extends past the ×.
+    private var circleOverhang: CGFloat { circleSize / 4 }
 }

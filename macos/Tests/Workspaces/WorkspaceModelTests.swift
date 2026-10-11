@@ -84,6 +84,21 @@ struct WorkspaceModelTests {
         #expect(model.workspaces[0].tabs.map(\.id) == [tabs[0].id, tabs[1].id])
     }
 
+    @Test func removingATabEndsRenamingItInTheSidebar() {
+        let (model, workspaces, tabs) = makeModel()
+        let extra = TerminalTab(surfaceTree: .init())
+        model.insert(extra, inWorkspace: workspaces[0].id)
+
+        model.renaming = .sidebarTab(extra.id)
+        model.remove(extra)
+        #expect(model.renaming == nil)
+
+        model.renaming = .sidebarTab(tabs[2].id)
+        model.select(tabs[0])
+        model.removeWorkspace(workspaces[2].id)
+        #expect(model.renaming == nil)
+    }
+
     private func makeModel() -> (WorkspaceModel, [Workspace], [TerminalTab]) {
         let model = WorkspaceModel()
         let tabs = (0..<3).map { _ in TerminalTab(surfaceTree: .init()) }
