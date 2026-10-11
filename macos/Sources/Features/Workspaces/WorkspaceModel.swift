@@ -90,6 +90,9 @@ struct Workspace: Identifiable {
     /// The tab shown when the workspace is selected.
     var selectedTabID: UUID?
 
+    /// Whether the sidebar lists the workspace's tabs under it.
+    var isExpanded = true
+
     var selectedTab: TerminalTab? {
         tabs.first { $0.id == selectedTabID } ?? tabs.first
     }
@@ -300,8 +303,13 @@ final class WorkspaceModel: ObservableObject {
     /// Appends a new workspace, or inserts it at `index`, and returns its
     /// ID. It has no tabs until one is inserted.
     @discardableResult
-    func addWorkspace(id: UUID = UUID(), customName: String? = nil, at index: Int? = nil) -> UUID {
-        let workspace = Workspace(id: id, customName: customName, tabs: [])
+    func addWorkspace(
+        id: UUID = UUID(),
+        customName: String? = nil,
+        isExpanded: Bool = true,
+        at index: Int? = nil
+    ) -> UUID {
+        let workspace = Workspace(id: id, customName: customName, tabs: [], isExpanded: isExpanded)
         workspaces.insert(workspace, at: min(index ?? workspaces.endIndex, workspaces.endIndex))
         return id
     }
@@ -418,6 +426,13 @@ final class WorkspaceModel: ObservableObject {
     func renameWorkspace(_ id: UUID, to name: String?) {
         guard let index = workspaceIndex(of: id) else { return }
         workspaces[index].customName = name
+    }
+
+    /// Expands a collapsed workspace in the sidebar, or collapses an
+    /// expanded one.
+    func toggleExpanded(ofWorkspace id: UUID) {
+        guard let index = workspaceIndex(of: id) else { return }
+        workspaces[index].isExpanded.toggle()
     }
 
     func moveWorkspace(_ id: UUID, to index: Int) {

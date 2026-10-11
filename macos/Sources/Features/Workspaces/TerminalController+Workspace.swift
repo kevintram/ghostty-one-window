@@ -315,6 +315,7 @@ extension TerminalController {
                     index: location.tab,
                     workspace: workspace.id,
                     customName: workspace.customName,
+                    isExpanded: workspace.isExpanded,
                     workspaceOrder: workspaceModel.workspaces.map(\.id),
                     wasShown: tab === selectedTab,
                     wasCurrent: workspace.selectedTab === tab)
@@ -486,9 +487,10 @@ extension TerminalController {
         let index: Int
         let workspace: UUID
 
-        /// The workspace's custom name and the workspace order, to recreate
-        /// the workspace if the tab was its last.
+        /// The workspace's custom name and expansion, and the workspace
+        /// order, to recreate the workspace if the tab was its last.
         let customName: String?
+        let isExpanded: Bool
         let workspaceOrder: [UUID]
 
         /// Whether the tab was shown, or its workspace's current tab.
@@ -509,7 +511,11 @@ extension TerminalController {
             let position = preceding.lazy
                 .compactMap { self.workspaceModel.workspaceIndex(of: $0) }
                 .first.map { $0 + 1 } ?? 0
-            workspaceModel.addWorkspace(id: id, customName: placement.customName, at: position)
+            workspaceModel.addWorkspace(
+                id: id,
+                customName: placement.customName,
+                isExpanded: placement.isExpanded,
+                at: position)
         }
 
         workspaceModel.insert(tab, inWorkspace: id, at: placement.index)

@@ -64,6 +64,26 @@ struct WorkspaceModelTests {
         #expect(model.workspaceSwitcher?.selectedWorkspaceID == workspaces[1].id)
     }
 
+    @Test func workspacesStartExpandedAndToggle() {
+        let (model, workspaces, _) = makeModel()
+
+        #expect(model.workspaces.map(\.isExpanded) == [true, true, true])
+        model.toggleExpanded(ofWorkspace: workspaces[1].id)
+        #expect(model.workspaces.map(\.isExpanded) == [true, false, true])
+        model.toggleExpanded(ofWorkspace: workspaces[1].id)
+        #expect(model.workspaces.map(\.isExpanded) == [true, true, true])
+    }
+
+    @Test func collapsedWorkspaceStaysCollapsedWhenTabsMoveIn() {
+        let (model, workspaces, tabs) = makeModel()
+
+        model.toggleExpanded(ofWorkspace: workspaces[0].id)
+        model.transfer(tabs[1], toWorkspace: workspaces[0].id)
+
+        #expect(model.workspaces[0].isExpanded == false)
+        #expect(model.workspaces[0].tabs.map(\.id) == [tabs[0].id, tabs[1].id])
+    }
+
     private func makeModel() -> (WorkspaceModel, [Workspace], [TerminalTab]) {
         let model = WorkspaceModel()
         let tabs = (0..<3).map { _ in TerminalTab(surfaceTree: .init()) }
