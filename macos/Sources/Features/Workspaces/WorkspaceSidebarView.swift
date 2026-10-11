@@ -221,7 +221,8 @@ private struct WorkspaceListView: View {
     }
 
     private static func slots(of model: WorkspaceModel) -> ReorderSlots {
-        ReorderSlots(count: model.workspaces.count + (model.incomingWorkspace == nil ? 0 : 1), stride: rowHeight)
+        let count = model.workspaces.count + (model.incomingWorkspace == nil ? 0 : 1)
+        return ReorderSlots(lengths: Array(repeating: rowHeight, count: count))
     }
 
     private func index(of id: UUID) -> Int? {
