@@ -77,9 +77,14 @@ class TerminalController: BaseTerminalController {
         workspaceModel.insert(tab, inWorkspace: workspaceModel.addWorkspace())
         workspaceModel.select(tab)
 
-        // Published values are sent before they're stored, so use the sent one.
+        // The workspaces are saved with the window (names, order, tabs), so
+        // any change to them invalidates its state. Published values are sent
+        // before they're stored, so use the sent one.
         restorationCancellable = workspaceModel.$workspaces.sink { [weak self] workspaces in
-            MainActor.assumeIsolated { self?.syncRestoration(workspaces) }
+            MainActor.assumeIsolated {
+                self?.syncRestoration(workspaces)
+                self?.invalidateRestorableState()
+            }
         }
 
         // Setup our notifications for behaviors
