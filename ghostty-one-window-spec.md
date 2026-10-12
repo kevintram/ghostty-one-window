@@ -139,8 +139,8 @@ one lists none, since the tab strip shows the selected workspace's tabs
 anyway. Clicking anywhere else on a header selects its workspace, or if it's
 already selected, expands or collapses it like the chevron. That happens on
 release, and not when the press drags the workspace. Every click counts, so
-quick clicks toggle it back and forth. New workspaces start expanded, and each workspace's
-expansion is saved with the window.
+quick clicks toggle it back and forth. Workspaces start collapsed, and each
+workspace's expansion is saved with the window.
 
 Only one row is highlighted, as Liquid Glass like the strip's selected tab:
 the tab shown in the window, or while its workspace is collapsed, the
@@ -542,10 +542,10 @@ override), and its selected tab. The window's selected tab's tree isn't
 repeated there, since decoding a tree creates its terminals; its workspace is
 the selected one.
 
-The state also records whether each workspace is expanded, which older state
-without it restores as expanded, and whether the sidebar was hidden; older state without it
-gets the default, hidden. Invalid workspace state restores the selected tab
-alone rather than failing.
+The state also records whether each workspace is expanded, and whether the
+sidebar was hidden. Older state without them gets the defaults: collapsed
+workspaces and a hidden sidebar. Invalid workspace state restores the
+selected tab alone rather than failing.
 
 Undoing a window close restores all of its workspaces and tabs, and its
 sidebar visibility.

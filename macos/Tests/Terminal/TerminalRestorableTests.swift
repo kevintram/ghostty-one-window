@@ -119,7 +119,7 @@ struct TerminalRestorableTests {
         typealias State = TerminalRestorableState.InternalState<MockView>
         let selected = try SplitTreeTests.makeHorizontalSplit()
         let other = try SplitTreeTests.makeHorizontalSplit()
-        let collapsed = try SplitTreeTests.makeHorizontalSplit()
+        let expanded = try SplitTreeTests.makeHorizontalSplit()
         let state = DummyTerminalRestorableState(State(
             focusedSurface: nil,
             surfaceTree: selected.0,
@@ -132,8 +132,8 @@ struct TerminalRestorableTests {
                     .init(surfaceTree: nil, focusedSurface: nil, titleOverride: nil),
                 ], selectedTab: 1),
                 .init(customName: nil, tabs: [
-                    .init(surfaceTree: collapsed.0, focusedSurface: nil, titleOverride: nil),
-                ], selectedTab: 0, expanded: false),
+                    .init(surfaceTree: expanded.0, focusedSurface: nil, titleOverride: nil),
+                ], selectedTab: 0, expanded: true),
             ],
             sidebarCollapsed: false,
             sidebarWidth: 280))
@@ -150,9 +150,9 @@ struct TerminalRestorableTests {
         #expect(workspace.tabs[0].surfaceTree?.contains(where: { $0.id == other.1.id }) == true)
         // The selected tab's tree is the top-level one, not repeated.
         #expect(workspace.tabs[1].surfaceTree == nil)
-        // Expansion is saved, and older state without it restores expanded.
+        // Expansion is saved; older state has none, and restores collapsed.
         #expect(workspace.expanded == nil)
-        #expect(v8.workspaces?.last?.expanded == false)
+        #expect(v8.workspaces?.last?.expanded == true)
         #expect(v8.sidebarCollapsed == false)
         #expect(v8.sidebarWidth == 280)
     }

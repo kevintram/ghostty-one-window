@@ -536,10 +536,8 @@ extension TerminalController {
             let position = preceding.lazy
                 .compactMap { self.workspaceModel.workspaceIndex(of: $0) }
                 .first.map { $0 + 1 } ?? 0
-            workspaceModel.addWorkspace(
-                id: id,
-                customName: placement.customName,
-                isExpanded: placement.isExpanded,
+            workspaceModel.insert(
+                Workspace(id: id, customName: placement.customName, tabs: [], isExpanded: placement.isExpanded),
                 at: position)
         }
 

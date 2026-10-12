@@ -37,7 +37,7 @@ extension TerminalRestorableState {
             let selectedTab: Int
 
             /// Whether the sidebar listed the workspace's tabs. Nil in older
-            /// state, which gets the default, expanded.
+            /// state, which gets the default, collapsed.
             var expanded: Bool?
         }
 
@@ -98,11 +98,8 @@ extension TerminalController {
         var workspaces: [Workspace] = []
         var selectedWorkspaceID: UUID?
         for savedWorkspace in saved {
-            var workspace = Workspace(
-                id: UUID(),
-                customName: savedWorkspace.customName,
-                tabs: [],
-                isExpanded: savedWorkspace.expanded ?? true)
+            var workspace = Workspace(id: UUID(), customName: savedWorkspace.customName, tabs: [])
+            if let expanded = savedWorkspace.expanded { workspace.isExpanded = expanded }
             for savedTab in savedWorkspace.tabs {
                 guard let tree = savedTab.surfaceTree else {
                     workspace.tabs.append(current)

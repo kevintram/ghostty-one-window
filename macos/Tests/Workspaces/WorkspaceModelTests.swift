@@ -64,23 +64,27 @@ struct WorkspaceModelTests {
         #expect(model.workspaceSwitcher?.selectedWorkspaceID == workspaces[1].id)
     }
 
-    @Test func workspacesStartExpandedAndToggle() {
+    @Test func workspacesStartCollapsedAndToggle() {
         let (model, workspaces, _) = makeModel()
 
-        #expect(model.workspaces.map(\.isExpanded) == [true, true, true])
+        #expect(model.workspaces.map(\.isExpanded) == [false, false, false])
         model.toggleExpanded(ofWorkspace: workspaces[1].id)
-        #expect(model.workspaces.map(\.isExpanded) == [true, false, true])
+        #expect(model.workspaces.map(\.isExpanded) == [false, true, false])
         model.toggleExpanded(ofWorkspace: workspaces[1].id)
-        #expect(model.workspaces.map(\.isExpanded) == [true, true, true])
+        #expect(model.workspaces.map(\.isExpanded) == [false, false, false])
+
+        let added = model.addWorkspace()
+        #expect(model.workspaces.last?.id == added)
+        #expect(model.workspaces.last?.isExpanded == false)
     }
 
-    @Test func collapsedWorkspaceStaysCollapsedWhenTabsMoveIn() {
+    @Test func expandedWorkspaceStaysExpandedWhenTabsMoveIn() {
         let (model, workspaces, tabs) = makeModel()
 
         model.toggleExpanded(ofWorkspace: workspaces[0].id)
         model.transfer(tabs[1], toWorkspace: workspaces[0].id)
 
-        #expect(model.workspaces[0].isExpanded == false)
+        #expect(model.workspaces[0].isExpanded == true)
         #expect(model.workspaces[0].tabs.map(\.id) == [tabs[0].id, tabs[1].id])
     }
 

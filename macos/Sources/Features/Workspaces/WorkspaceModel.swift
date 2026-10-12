@@ -90,8 +90,9 @@ struct Workspace: Identifiable {
     /// The tab shown when the workspace is selected.
     var selectedTabID: UUID?
 
-    /// Whether the sidebar lists the workspace's tabs under it.
-    var isExpanded = true
+    /// Whether the sidebar lists the workspace's tabs under it. Workspaces
+    /// start collapsed.
+    var isExpanded = false
 
     var selectedTab: TerminalTab? {
         tabs.first { $0.id == selectedTabID } ?? tabs.first
@@ -312,13 +313,8 @@ final class WorkspaceModel: ObservableObject {
     /// Appends a new workspace, or inserts it at `index`, and returns its
     /// ID. It has no tabs until one is inserted.
     @discardableResult
-    func addWorkspace(
-        id: UUID = UUID(),
-        customName: String? = nil,
-        isExpanded: Bool = true,
-        at index: Int? = nil
-    ) -> UUID {
-        let workspace = Workspace(id: id, customName: customName, tabs: [], isExpanded: isExpanded)
+    func addWorkspace(id: UUID = UUID(), customName: String? = nil, at index: Int? = nil) -> UUID {
+        let workspace = Workspace(id: id, customName: customName, tabs: [])
         workspaces.insert(workspace, at: min(index ?? workspaces.endIndex, workspaces.endIndex))
         return id
     }
