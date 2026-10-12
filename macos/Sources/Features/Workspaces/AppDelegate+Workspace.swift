@@ -51,6 +51,9 @@ extension AppDelegate {
         add("Move Workspace Up", #selector(TerminalController.moveWorkspaceUp(_:)), binding: "move_workspace:-1", to: menu)
         add("Move Workspace Down", #selector(TerminalController.moveWorkspaceDown(_:)), binding: "move_workspace:1", to: menu)
         menu.addItem(.separator())
+        add("Expand All Workspaces", #selector(TerminalController.expandAllWorkspaces(_:)), binding: nil, to: menu)
+        add("Collapse All Workspaces", #selector(TerminalController.collapseAllWorkspaces(_:)), binding: nil, to: menu)
+        menu.addItem(.separator())
         add(
             "Move Tab to Previous Workspace",
             #selector(TerminalController.moveTabToPreviousWorkspace(_:)),

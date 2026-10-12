@@ -77,9 +77,14 @@ class TerminalController: BaseTerminalController {
         workspaceModel.insert(tab, inWorkspace: workspaceModel.addWorkspace())
         workspaceModel.select(tab)
 
-        // Published values are sent before they're stored, so use the sent one.
+        // The workspaces are saved with the window (names, order, expansion,
+        // tabs), so any change to them invalidates its state. Published values
+        // are sent before they're stored, so use the sent one.
         restorationCancellable = workspaceModel.$workspaces.sink { [weak self] workspaces in
-            MainActor.assumeIsolated { self?.syncRestoration(workspaces) }
+            MainActor.assumeIsolated {
+                self?.syncRestoration(workspaces)
+                self?.invalidateRestorableState()
+            }
         }
 
         // Setup our notifications for behaviors
@@ -946,7 +951,7 @@ class TerminalController: BaseTerminalController {
 
     @IBAction func closeTabsOnTheRight(_ sender: Any?) {
         guard let selectedTab else { return }
-        closeTabs(rightOf: selectedTab)
+        closeTabs(after: selectedTab)
     }
 
     @IBAction func returnToDefaultSize(_ sender: Any?) {
@@ -1219,6 +1224,12 @@ extension TerminalController {
 
         case #selector(renameWorkspace), #selector(closeWorkspace), #selector(selectWorkspaceByNumber):
             return supportsTabs
+
+        case #selector(expandAllWorkspaces):
+            return supportsTabs && workspaceModel.canSetAllExpanded(true)
+
+        case #selector(collapseAllWorkspaces):
+            return supportsTabs && workspaceModel.canSetAllExpanded(false)
 
         case #selector(returnToDefaultSize):
             guard let window else { return false }

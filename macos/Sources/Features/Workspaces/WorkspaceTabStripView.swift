@@ -83,7 +83,7 @@ private struct TabStrip: View {
                     .zIndex(phase(of: tab) == nil ? 0 : 1)
                     // Clicks in the title field while renaming position the cursor.
                     .gesture(reorderGesture(for: tab), including: isRenaming(tab) ? .subviews : .all)
-                    .contextMenu { menu(for: tab) }
+                    .contextMenu { TabContextMenu(tab: tab, model: model, controller: controller) }
                     // A tab from another window isn't this strip's until dropped.
                     .allowsHitTesting(tab !== model.incomingTab)
                 }
@@ -168,57 +168,16 @@ private struct TabStrip: View {
         model.tabs + (model.incomingTab.map { [$0] } ?? [])
     }
 
-    /// The tabs' slots with all of them in the strip. The dragged tab is the
-    /// selected one, since pressing a tab selects it, or one dragged in from
-    /// another window, which shows as selected.
-    private var slots: ReorderSlots {
+    /// The tabs' slots with all of them in the strip, while the tab at
+    /// `from` is dragged. The dragged tab is the selected one, and as wide,
+    /// since pressing a tab selects it, or one dragged in from another
+    /// window, which shows as selected.
+    private func slots(draggingFrom from: Int) -> ReorderSlots {
         let count = displayedTabs.count
         let widths = tabWidths(count: sizingCount(count), includingSelected: true)
-        return ReorderSlots(
-            count: count,
-            stride: widths.other + Self.spacing,
-            draggedStride: widths.selected + Self.spacing)
-    }
-
-    /// The tab's context menu. It acts on the tab, which it doesn't select.
-    @ViewBuilder
-    private func menu(for tab: TerminalTab) -> some View {
-        let otherWorkspaces = model.workspaces.filter { !$0.tabs.contains { $0 === tab } }
-
-        Button("New Tab to the Right") {
-            controller.value?.newTab(after: tab)
-        }
-        Divider()
-        Button("Rename Tab…") {
-            controller.value?.beginRenamingTab(tab)
-        }
-        Menu("Move to Workspace") {
-            ForEach(otherWorkspaces) { workspace in
-                Button(workspace.name) {
-                    controller.value?.moveTab(tab, toWorkspace: workspace.id)
-                }
-            }
-            if !otherWorkspaces.isEmpty { Divider() }
-            Button("New Workspace") {
-                controller.value?.moveTabToNewWorkspace(tab)
-            }
-        }
-        Button("Move to New Window") {
-            controller.value?.moveTabToNewWindow(tab)
-        }
-        .disabled(model.allTabs.count < 2)
-        Divider()
-        Button("Close Tab") {
-            controller.value?.close(tab: tab)
-        }
-        Button("Close Other Tabs") {
-            controller.value?.closeOtherTabs(than: tab)
-        }
-        .disabled(model.otherTabs(than: tab).isEmpty)
-        Button("Close Tabs to the Right") {
-            controller.value?.closeTabs(rightOf: tab)
-        }
-        .disabled(model.tabs(rightOf: tab).isEmpty)
+        var lengths = Array(repeating: widths.other + Self.spacing, count: count)
+        if lengths.indices.contains(from) { lengths[from] = widths.selected + Self.spacing }
+        return ReorderSlots(lengths: lengths)
     }
 
     // MARK: Reordering
@@ -254,7 +213,7 @@ private struct TabStrip: View {
 
         // The tabs can't change width during the drag, so capture the layout.
         let model = model
-        let slots = slots
+        let slots = self.slots(draggingFrom: from)
         let host = Self.stripHost(at: press)
         let controller = controller
 
@@ -284,24 +243,22 @@ private struct TabStrip: View {
                 return
             }
             let to = slots.destination(from: from, offset: slots.clamped(translation.width, from: from))
-            Self.settle(tab, from: from, to: to, stride: slots.stride, in: model) { model.moveTab(tab, to: to) }
+            Self.settle(tab, by: slots.distance(from: from, to: to), in: model) { model.moveTab(tab, to: to) }
         } cancelled: { [weak model] in
             // Ends the drag without moving the tab, so it slides back.
             model?.tabDrag = nil
         }
     }
 
-    /// Settles the dragged tab into slot `to`, then moves it there with
-    /// `move` (see `WorkspaceDragOut.settle`).
+    /// Settles the dragged tab into the slot `distance` from its own, then
+    /// moves it there with `move` (see `WorkspaceDragOut.settle`).
     private static func settle(
         _ tab: TerminalTab,
-        from: Int,
-        to: Int,
-        stride: CGFloat,
+        by distance: CGFloat,
         in model: WorkspaceModel,
         move: @escaping () -> Void
     ) {
-        model.tabDrag = Drag(id: tab.id, offset: CGFloat(to - from) * stride, phase: .settling)
+        model.tabDrag = Drag(id: tab.id, offset: distance, phase: .settling)
         WorkspaceDragOut.settle(.tab(tab), for: slideDuration, move: move)
     }
 
@@ -326,7 +283,7 @@ private struct TabStrip: View {
               drag.phase != .draggingOut,
               let from = index(of: drag.id),
               let index = index(of: tab.id) else { return 0 }
-        return slots.offset(of: index, draggingFrom: from, by: drag.offset)
+        return slots(draggingFrom: from).offset(of: index, draggingFrom: from, by: drag.offset)
     }
 
     /// Whether the tab's title is being edited in the strip.
@@ -374,10 +331,12 @@ extension TabStrip: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         guard let drag, let from = index(of: drag.id) else { return false }
         let tab = displayedTabs[from]
+        let slots = self.slots(draggingFrom: from)
         let to = slots.destination(from: from, offset: drag.offset)
+        let distance = slots.distance(from: from, to: to)
         let model = model
         guard tab === model.incomingTab else {
-            Self.settle(tab, from: from, to: to, stride: slots.stride, in: model) { model.moveTab(tab, to: to) }
+            Self.settle(tab, by: distance, in: model) { model.moveTab(tab, to: to) }
             return true
         }
 
@@ -387,7 +346,7 @@ extension TabStrip: DropDelegate {
         let destination = controller
         let source = WorkspaceDragOut.draggedTab?.source
         let workspace = model.selectedWorkspaceID
-        Self.settle(tab, from: from, to: to, stride: slots.stride, in: model) { [weak source] in
+        Self.settle(tab, by: distance, in: model) { [weak source] in
             guard let source, let workspace else { return }
             destination.value?.receive(tab, from: source, inWorkspace: workspace, at: to)
         }
@@ -401,10 +360,61 @@ extension TabStrip: DropDelegate {
         withAnimation(drag?.phase == .following ? nil : Self.slide) {
             if !model.contains(tab) { model.incomingTab = tab }
             guard let from = index(of: tab.id) else { return }
-            let slots = slots
-            let center = Self.inset + CGFloat(from) * slots.stride + (slots.draggedStride - Self.spacing) / 2
+            let slots = self.slots(draggingFrom: from)
+            let center = Self.inset + slots.start(of: from) + (slots.lengths[from] - Self.spacing) / 2
             model.tabDrag = Drag(id: tab.id, offset: slots.clamped(info.location.x - center, from: from))
         }
+    }
+}
+
+/// A tab's context menu, in the tab strip or the sidebar. It acts on the
+/// tab, which it doesn't select.
+struct TabContextMenu: View {
+    let tab: TerminalTab
+    let model: WorkspaceModel
+    let controller: Weak<TerminalController>
+
+    /// Where the tab is listed, which its actions are worded for, and where
+    /// renaming it renames it.
+    var list = WorkspaceModel.TabList.strip
+
+    var body: some View {
+        let otherWorkspaces = model.workspaces.filter { !$0.tabs.contains { $0 === tab } }
+
+        Button("New Tab \(list.afterTitle)") {
+            controller.value?.newTab(after: tab)
+        }
+        Divider()
+        Button("Rename Tab…") {
+            controller.value?.beginRenamingTab(tab, in: list)
+        }
+        Menu("Move to Workspace") {
+            ForEach(otherWorkspaces) { workspace in
+                Button(workspace.name) {
+                    controller.value?.moveTab(tab, toWorkspace: workspace.id)
+                }
+            }
+            if !otherWorkspaces.isEmpty { Divider() }
+            Button("New Workspace") {
+                controller.value?.moveTabToNewWorkspace(tab)
+            }
+        }
+        Button("Move to New Window") {
+            controller.value?.moveTabToNewWindow(tab)
+        }
+        .disabled(model.allTabs.count < 2)
+        Divider()
+        Button("Close Tab") {
+            controller.value?.close(tab: tab)
+        }
+        Button("Close Other Tabs") {
+            controller.value?.closeOtherTabs(than: tab)
+        }
+        .disabled(model.otherTabs(than: tab).isEmpty)
+        Button("Close Tabs \(list.afterTitle)") {
+            controller.value?.closeTabs(after: tab, in: list)
+        }
+        .disabled(model.tabs(rightOf: tab).isEmpty)
     }
 }
 

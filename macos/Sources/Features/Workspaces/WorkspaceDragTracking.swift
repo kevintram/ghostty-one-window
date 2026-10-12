@@ -91,45 +91,70 @@ enum PressDragTracker {
     }
 }
 
-/// Equally spaced slots in a row or column, one of which is being dragged to
-/// reorder it: the tab strip's tabs or the sidebar's workspaces. The dragged
-/// slot may be a different size from the others (the tab strip keeps the
-/// selected tab wider).
+/// Slots in a row or column, one of which is being dragged to reorder it:
+/// the tab strip's tabs or the sidebar's workspaces. Each slot has its own
+/// length, since the strip keeps the selected tab wider and a workspace is as
+/// tall as the tabs listed under it. The dragged slot passes another once
+/// it's dragged past that slot's middle.
 struct ReorderSlots {
-    let count: Int
+    /// Each slot's length, including any gap after it.
+    let lengths: [CGFloat]
 
-    /// The distance between adjacent slots other than the dragged one.
-    let stride: CGFloat
+    var count: Int { lengths.count }
 
-    /// The distance the dragged slot takes up, which the slots it passes
-    /// move by.
-    let draggedStride: CGFloat
+    /// Where the slot at `index` starts, from the start of the first.
+    func start(of index: Int) -> CGFloat {
+        lengths[..<index].reduce(0, +)
+    }
 
-    init(count: Int, stride: CGFloat, draggedStride: CGFloat? = nil) {
-        self.count = count
-        self.stride = stride
-        self.draggedStride = draggedStride ?? stride
+    /// The slot at `position`, from the start of the first, if any.
+    func slot(at position: CGFloat) -> Int? {
+        guard position >= 0 else { return nil }
+        var end: CGFloat = 0
+        return lengths.firstIndex { length in
+            end += length
+            return position < end
+        }
     }
 
     /// Keeps the slot at `index`, dragged by `offset`, within the slots.
     func clamped(_ offset: CGFloat, from index: Int) -> CGFloat {
-        min(max(offset, -CGFloat(index) * stride), CGFloat(count - 1 - index) * stride)
+        let after = lengths[(index + 1)...].reduce(0, +)
+        return min(max(offset, -start(of: index)), after)
     }
 
     /// Where the slot at `index`, dragged by `offset`, would land.
     func destination(from index: Int, offset: CGFloat) -> Int {
-        guard stride > 0 else { return index }
-        return min(max(index + Int((offset / stride).rounded()), 0), count - 1)
+        var to = index
+        var passed: CGFloat = 0
+        if offset > 0 {
+            while to + 1 < count, offset > passed + lengths[to + 1] / 2 {
+                passed += lengths[to + 1]
+                to += 1
+            }
+        } else {
+            while to > 0, -offset > passed + lengths[to - 1] / 2 {
+                passed += lengths[to - 1]
+                to -= 1
+            }
+        }
+        return to
     }
 
     /// How far the slot at `index` is drawn from its place while the slot at
     /// `from` is dragged by `offset`: the dragged slot by the drag, and the
-    /// slots it has passed by one slot toward where it came from.
+    /// slots it has passed by its length toward where it came from.
     func offset(of index: Int, draggingFrom from: Int, by offset: CGFloat) -> CGFloat {
         if index == from { return offset }
         let to = destination(from: from, offset: offset)
-        if from < to, (from + 1...to).contains(index) { return -draggedStride }
-        if to < from, (to..<from).contains(index) { return draggedStride }
+        if from < to, (from + 1...to).contains(index) { return -lengths[from] }
+        if to < from, (to..<from).contains(index) { return lengths[from] }
         return 0
+    }
+
+    /// How far the slot at `from` moves to land in slot `to`.
+    func distance(from: Int, to: Int) -> CGFloat {
+        if to > from { return lengths[(from + 1)...to].reduce(0, +) }
+        return -lengths[to..<from].reduce(0, +)
     }
 }

@@ -90,6 +90,10 @@ struct Workspace: Identifiable {
     /// The tab shown when the workspace is selected.
     var selectedTabID: UUID?
 
+    /// Whether the sidebar lists the workspace's tabs under it. Workspaces
+    /// start collapsed.
+    var isExpanded = false
+
     var selectedTab: TerminalTab? {
         tabs.first { $0.id == selectedTabID } ?? tabs.first
     }
@@ -134,13 +138,55 @@ final class WorkspaceModel: ObservableObject {
 
     /// What's being renamed in place, one thing at a time: a tab in the tab
     /// strip (which shows while it is, even for a single tab), or a
-    /// workspace in the sidebar.
+    /// workspace or tab in the sidebar.
     enum Renaming: Equatable {
         case tab(UUID)
         case workspace(UUID)
+        case sidebarTab(UUID)
+
+        /// The tab being renamed, wherever it is.
+        var tabID: UUID? {
+            switch self {
+            case .tab(let id), .sidebarTab(let id): id
+            case .workspace: nil
+            }
+        }
     }
 
     @Published var renaming: Renaming?
+
+    /// Where a window lists tabs: the selected workspace's across the tab
+    /// strip, or every expanded workspace's down the sidebar. Renaming a tab
+    /// edits it where it was chosen, and actions on the tabs after it are
+    /// worded for the list's direction.
+    enum TabList {
+        case strip
+        case sidebar
+
+        /// Renaming the tab in this list.
+        func renaming(_ tab: UUID) -> Renaming {
+            switch self {
+            case .strip: .tab(tab)
+            case .sidebar: .sidebarTab(tab)
+            }
+        }
+
+        /// Where the tabs after a tab are, as in a menu item or action name.
+        var afterTitle: String {
+            switch self {
+            case .strip: "to the Right"
+            case .sidebar: "Below"
+            }
+        }
+
+        /// Where the tabs after a tab are, as in a sentence.
+        var afterPhrase: String {
+            switch self {
+            case .strip: "to the right"
+            case .sidebar: "below"
+            }
+        }
+    }
 
     /// An item being dragged to reorder it, a tab in the tab strip or a
     /// workspace in the sidebar, and how far it's been dragged.
@@ -317,10 +363,8 @@ final class WorkspaceModel: ObservableObject {
         guard let index = workspaceIndex(of: id) else { return }
         let workspace = workspaces.remove(at: index)
         forgetWorkspace(id)
-        switch renaming {
-        case .workspace(id): renaming = nil
-        case .tab(let tab) where workspace.tabs.contains(where: { $0.id == tab }): renaming = nil
-        default: break
+        if renaming == .workspace(id) || workspace.tabs.contains(where: { $0.id == renaming?.tabID }) {
+            renaming = nil
         }
         if workspaceDrag?.id == id { workspaceDrag = nil }
     }
@@ -342,7 +386,7 @@ final class WorkspaceModel: ObservableObject {
             workspaces.remove(at: location.workspace)
             forgetWorkspace(workspaceID)
         }
-        if renaming == .tab(tab.id) { renaming = nil }
+        if renaming?.tabID == tab.id { renaming = nil }
         if tabDrag?.id == tab.id { tabDrag = nil }
     }
 
@@ -418,6 +462,29 @@ final class WorkspaceModel: ObservableObject {
     func renameWorkspace(_ id: UUID, to name: String?) {
         guard let index = workspaceIndex(of: id) else { return }
         workspaces[index].customName = name
+    }
+
+    /// Expands a collapsed workspace in the sidebar, or collapses an
+    /// expanded one.
+    func toggleExpanded(ofWorkspace id: UUID) {
+        guard let index = workspaceIndex(of: id) else { return }
+        workspaces[index].isExpanded.toggle()
+    }
+
+    /// Whether any workspace would change if every workspace were expanded,
+    /// or collapsed.
+    func canSetAllExpanded(_ isExpanded: Bool) -> Bool {
+        workspaces.contains { $0.isExpanded != isExpanded }
+    }
+
+    /// Expands or collapses every workspace in the sidebar, as one change.
+    func setAllExpanded(_ isExpanded: Bool) {
+        guard canSetAllExpanded(isExpanded) else { return }
+        workspaces = workspaces.map { workspace in
+            var workspace = workspace
+            workspace.isExpanded = isExpanded
+            return workspace
+        }
     }
 
     func moveWorkspace(_ id: UUID, to index: Int) {

@@ -35,6 +35,10 @@ extension TerminalRestorableState {
             let customName: String?
             let tabs: [TabState]
             let selectedTab: Int
+
+            /// Whether the sidebar listed the workspace's tabs. Nil in older
+            /// state, which gets the default, collapsed.
+            var expanded: Bool?
         }
 
         struct TabState: Codable {
@@ -73,7 +77,8 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
                             focusedSurface: tab.focusedSurface?.id.uuidString,
                             titleOverride: tab.titleOverride)
                     },
-                    selectedTab: tabs.firstIndex { $0 === workspace.selectedTab } ?? 0)
+                    selectedTab: tabs.firstIndex { $0 === workspace.selectedTab } ?? 0,
+                    expanded: workspace.isExpanded)
             },
             sidebarCollapsed: model.isSidebarCollapsed,
             sidebarWidth: model.sidebarWidth,
@@ -94,6 +99,7 @@ extension TerminalController {
         var selectedWorkspaceID: UUID?
         for savedWorkspace in saved {
             var workspace = Workspace(id: UUID(), customName: savedWorkspace.customName, tabs: [])
+            if let expanded = savedWorkspace.expanded { workspace.isExpanded = expanded }
             for savedTab in savedWorkspace.tabs {
                 guard let tree = savedTab.surfaceTree else {
                     workspace.tabs.append(current)

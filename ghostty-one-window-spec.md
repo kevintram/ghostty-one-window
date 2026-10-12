@@ -123,13 +123,43 @@ The sidebar is the window's workspace bar. It is a native
 full-height split-view sidebar on the left of the window: it extends under the
 titlebar, and the window buttons sit on top of it. It contains:
 
-- An ordered list of workspaces.
-- A clear selected state for the active workspace.
+- An ordered list of workspaces, each listing its tabs while it's expanded.
+- A clear selected state for the shown tab, or its workspace while that's
+  collapsed.
 - Controls or contextual actions for creating, renaming, reordering, and
   closing workspaces.
 
-Tabs do not appear in the sidebar. The active workspace's tabs appear in the
-tab strip (6.3).
+Each workspace is a group, like the tab groups in Dia's sidebar: a header with
+the workspace's icon, its name in bold, and a chevron right after it, then its
+tabs, each with a terminal icon. Tabs aren't indented: their icons line up
+with the workspace's, and their titles with its name. A wider gap between
+groups sets each workspace's tabs apart from the next. Every workspace has a
+header, even one with a single tab. Clicking the chevron expands or collapses
+the workspace: the chevron turns, the tabs fade, and the groups below slide.
+An expanded workspace lists all of its tabs; a collapsed one lists none, since
+the tab strip shows the selected workspace's tabs anyway. Clicking anywhere
+else on a header selects its workspace, or if it's already selected, expands
+or collapses it like the chevron. That happens on release, and not when the
+press drags the workspace. Every click counts, so quick clicks toggle it back
+and forth. Option-clicking a chevron expands or collapses every workspace, and
+so do Expand All and Collapse All buttons pinned under the list, and the
+Workspace menu's Expand All Workspaces and Collapse All Workspaces; each is
+disabled while it would change nothing. Workspaces start collapsed, and each
+workspace's expansion is saved with the window.
+
+Only one row is highlighted, as Liquid Glass like the strip's selected tab:
+the tab shown in the window, or while its workspace is collapsed, the
+workspace's header. The selected workspace's whole group is also tinted, so it
+stands out while it's expanded too, and VoiceOver reads its header as the
+current workspace. Hovering a group tints all of it, the selected one more
+deeply; hovering its header or a tab highlights that row too and shows its
+close button, which takes no room from the name while hidden.
+
+A tab row acts like the tab in the strip: pressing it selects it,
+double-clicking or Rename Tab… in its context menu renames it in place in
+the sidebar, middle-clicking closes it, and its context menu is the strip's
+("Below" in place of "to the Right"). Tabs aren't dragged from the sidebar
+yet. The selected workspace's tabs also appear in the tab strip (6.3).
 
 The workspace bar should use standard macOS appearance and interaction
 patterns. It is stable application chrome: switching tabs or workspaces must
@@ -248,6 +278,7 @@ Control in place of Command.
 | Close Window | `Control-Command-W` | `close_window` | Close the application window, including every workspace in it. |
 | Close All Windows | `Command-Option-Shift-W` | `close_all_windows` | Close every window. |
 | Merge All Windows | None (Window menu) | — | Move every other window's workspaces into this one. |
+| Expand / Collapse All Workspaces | None (Workspace menu, sidebar) | — | Expand or collapse every workspace in the sidebar. |
 | Move Tab to New Window | None (menus) | `move_tab_to_new_window` | Move the shown tab into a new window. |
 | New Workspace | `Command-N` | `new_workspace` | Create and select a workspace containing one new tab. |
 | Close Workspace | `Command-Shift-W` | `close_workspace` | Close the selected workspace and all of its tabs (8). |
@@ -310,8 +341,8 @@ Workspace names do not need to be unique within an application window.
 
 ### Renaming a workspace
 
-A workspace is renamed in place in the sidebar, by double-clicking its row,
-choosing Rename Workspace… from the row's context menu, or with Rename
+A workspace is renamed in place in the sidebar, by choosing Rename
+Workspace… from its header's context menu, or with Rename
 Workspace (`Command-Shift-R`) for the selected workspace, which shows the
 sidebar if it's collapsed. Its name becomes a text field: Return saves it,
 and so does clicking elsewhere or switching apps; Escape cancels. Keyboard
@@ -338,8 +369,8 @@ the last workspace in an application window is closed, the application window
 closes, with Close Window's confirmation.
 
 Undoing a workspace close puts the workspace back where it was, with its
-tabs in order and its custom name, reselecting the tab that was shown if it
-was the selected workspace. Like undoing a tab close, it keeps the terminals
+tabs in order, its custom name and its expansion, reselecting the tab that
+was shown if it was the selected workspace. Like undoing a tab close, it keeps the terminals
 alive until it expires.
 
 ### Reordering workspaces
@@ -376,7 +407,8 @@ application window. This only moves the tab between workspaces. The terminal
 process and split tree remain unchanged.
 
 A tab is moved by dragging it out of the tab strip onto another workspace in
-the sidebar, which highlights while the tab is over it. The tab goes to the
+the sidebar, whose whole group (header and tabs) highlights while the tab is
+over it. The tab goes to the
 end of that workspace, and the selection follows it: its new workspace is
 selected with the tab. The workspace it left shows the tab's neighbor when
 switched back to. A context-menu action is a possible later addition.
@@ -518,9 +550,10 @@ override), and its selected tab. The window's selected tab's tree isn't
 repeated there, since decoding a tree creates its terminals; its workspace is
 the selected one.
 
-The state also records whether the sidebar was hidden; older state without it
-gets the default, hidden. Invalid workspace state restores the selected tab
-alone rather than failing.
+The state also records whether each workspace is expanded, and whether the
+sidebar was hidden. Older state without them gets the defaults: collapsed
+workspaces and a hidden sidebar. Invalid workspace state restores the
+selected tab alone rather than failing.
 
 Undoing a window close restores all of its workspaces and tabs, and its
 sidebar visibility.
@@ -586,7 +619,11 @@ Implemented:
   with New Workspace and the sidebar toggle.
 - Tab strip with titles, selection, close on hover, and New Tab; hidden for a
   single tab.
-- Workspace drag-to-reorder in the sidebar.
+- Expanding and collapsing every workspace at once (6.1).
+- Expandable workspaces in the sidebar listing their tabs (6.1), with
+  selecting, renaming, closing, and context menus for tab rows; expansion is
+  saved for restoration.
+- Workspace drag-to-reorder in the sidebar, moving a group with its tabs.
 - Tab drag-to-reorder in the strip, and moving tabs between workspaces by
   dragging them out of the strip onto the sidebar.
 - Dragging tabs between windows, onto another window's strip or sidebar, or
@@ -594,7 +631,7 @@ Implemented:
 - Dragging workspaces between windows, onto another window's sidebar, or out
   of every window into a new one.
 - Renaming tabs in place in the strip (`Command-R`), and workspaces in place
-  in the sidebar (double-click, context menu, `Command-Shift-R`).
+  in the sidebar (context menu, `Command-Shift-R`).
 - Closing workspaces from the context menu or the Workspace menu, with one
   confirmation for all of their tabs and undo.
 - Context menus for tabs and workspaces (6.3).
@@ -618,6 +655,9 @@ Implemented:
   whose entries for the tab would act on the wrong window.
 
 Not yet implemented:
+
+- Dragging tab rows in the sidebar, to reorder them or move them to another
+  workspace or window.
 
 - Dragging a tab that's alone in its workspace (its strip is hidden).
 - Per-tab colors (the tab color is per window) and bell indicators in the tab

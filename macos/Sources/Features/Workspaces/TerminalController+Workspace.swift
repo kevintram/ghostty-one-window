@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import SwiftUI
 
 // A window holds the tabs of all of its workspaces in its `workspaceModel`.
 // Only the selected tab's split tree is in the window: it's the controller's
@@ -315,6 +316,7 @@ extension TerminalController {
                     index: location.tab,
                     workspace: workspace.id,
                     customName: workspace.customName,
+                    isExpanded: workspace.isExpanded,
                     workspaceOrder: workspaceModel.workspaces.map(\.id),
                     wasShown: tab === selectedTab,
                     wasCurrent: workspace.selectedTab === tab)
@@ -383,13 +385,15 @@ extension TerminalController {
             informativeText: "At least one other tab still has a running process. If you close the tab the process will be killed.")
     }
 
-    /// Closes the tabs to the right of the tab in its workspace.
-    func closeTabs(rightOf tab: TerminalTab) {
+    /// Closes the tabs after the tab in its workspace: to its right in the
+    /// tab strip, or below it in the sidebar, as `list` words it for the
+    /// confirmation and Undo.
+    func closeTabs(after tab: TerminalTab, in list: WorkspaceModel.TabList = .strip) {
         close(
             workspaceModel.tabs(rightOf: tab),
             showing: tab,
-            actionName: "Close Tabs to the Right",
-            informativeText: "At least one tab to the right still has a running process. If you close the tab the process will be killed.")
+            actionName: "Close Tabs \(list.afterTitle)",
+            informativeText: "At least one tab \(list.afterPhrase) still has a running process. If you close the tab the process will be killed.")
     }
 
     /// Closes several tabs as one action, asking once, titled after the
@@ -486,9 +490,10 @@ extension TerminalController {
         let index: Int
         let workspace: UUID
 
-        /// The workspace's custom name and the workspace order, to recreate
-        /// the workspace if the tab was its last.
+        /// The workspace's custom name and expansion, and the workspace
+        /// order, to recreate the workspace if the tab was its last.
         let customName: String?
+        let isExpanded: Bool
         let workspaceOrder: [UUID]
 
         /// Whether the tab was shown, or its workspace's current tab.
@@ -509,7 +514,9 @@ extension TerminalController {
             let position = preceding.lazy
                 .compactMap { self.workspaceModel.workspaceIndex(of: $0) }
                 .first.map { $0 + 1 } ?? 0
-            workspaceModel.addWorkspace(id: id, customName: placement.customName, at: position)
+            workspaceModel.insert(
+                Workspace(id: id, customName: placement.customName, tabs: [], isExpanded: placement.isExpanded),
+                at: position)
         }
 
         workspaceModel.insert(tab, inWorkspace: id, at: placement.index)
@@ -739,10 +746,11 @@ extension TerminalController {
 
     // MARK: Renaming
 
-    /// Starts renaming a tab in the tab strip, which shows while it is.
-    func beginRenamingTab(_ tab: TerminalTab) {
+    /// Starts renaming a tab in place in `list`: the tab strip, which shows
+    /// while it is, or the sidebar.
+    func beginRenamingTab(_ tab: TerminalTab, in list: WorkspaceModel.TabList = .strip) {
         guard workspaceModel.contains(tab) else { return }
-        workspaceModel.renaming = .tab(tab.id)
+        workspaceModel.renaming = list.renaming(tab.id)
     }
 
     /// Sets a tab's title override. The shown tab's goes through the
@@ -755,11 +763,11 @@ extension TerminalController {
         }
     }
 
-    /// Ends renaming a tab in the tab strip, setting its title to `title`,
-    /// or leaving it if nil (cancelled). An empty title restores the
-    /// terminal's own. Keyboard focus goes back to the terminal.
-    func endRenamingTab(_ tab: TerminalTab, title: String?) {
-        endRenaming(.tab(tab.id))
+    /// Ends renaming a tab in the tab strip or sidebar, setting its title to
+    /// `title`, or leaving it if nil (cancelled). An empty title restores
+    /// the terminal's own. Keyboard focus goes back to the terminal.
+    func endRenamingTab(_ tab: TerminalTab, title: String?, in list: WorkspaceModel.TabList = .strip) {
+        endRenaming(list.renaming(tab.id))
         if let title { setTitleOverride(title.isEmpty ? nil : title, of: tab) }
     }
 
@@ -795,7 +803,23 @@ extension TerminalController {
         if let focusedSurface { window?.makeFirstResponder(focusedSurface) }
     }
 
+    // MARK: Expanding
+
+    /// Expands or collapses every workspace in the sidebar, sliding them
+    /// together.
+    func setAllWorkspacesExpanded(_ isExpanded: Bool) {
+        withAnimation(WorkspaceSidebarView.expansion) { workspaceModel.setAllExpanded(isExpanded) }
+    }
+
     // MARK: First Responder
+
+    @IBAction func expandAllWorkspaces(_ sender: Any?) {
+        setAllWorkspacesExpanded(true)
+    }
+
+    @IBAction func collapseAllWorkspaces(_ sender: Any?) {
+        setAllWorkspacesExpanded(false)
+    }
 
     /// Renames the selected workspace.
     @IBAction func renameWorkspace(_ sender: Any?) {
