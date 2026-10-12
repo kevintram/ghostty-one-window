@@ -129,16 +129,17 @@ titlebar, and the window buttons sit on top of it. It contains:
 - Controls or contextual actions for creating, renaming, reordering, and
   closing workspaces.
 
-Each workspace is a group, like the tab groups in Dia's sidebar: a header
-with the workspace's icon, its name in bold, and a chevron right after the
-name, then its tabs, indented so their icons line up with the name. Every
-workspace has a header, even one with a single tab. Clicking the chevron
-expands or collapses the workspace: the chevron turns, the tabs fade, and the
-groups below slide. An expanded workspace lists all of its tabs; a collapsed
-one lists none, since the tab strip shows the selected workspace's tabs
-anyway. Clicking anywhere else on a header selects its workspace, or if it's
-already selected, expands or collapses it like the chevron. That happens on
-release, and not when the press drags the workspace. Every click counts, so
+Each workspace is a group, like the tab groups in Dia's sidebar: a header with
+the workspace's name in bold and a chevron right after it, then its tabs, each
+with a terminal icon. Tabs aren't indented, so the name lines up with their
+icons, and a wider gap between groups sets each workspace's tabs apart from
+the next. Every workspace has a header, even one with a single tab. Clicking
+the chevron expands or collapses the workspace: the chevron turns, the tabs
+fade, and the groups below slide. An expanded workspace lists all of its tabs;
+a collapsed one lists none, since the tab strip shows the selected workspace's
+tabs anyway. Clicking anywhere else on a header selects its workspace, or if
+it's already selected, expands or collapses it like the chevron. That happens
+on release, and not when the press drags the workspace. Every click counts, so
 quick clicks toggle it back and forth. Workspaces start collapsed, and each
 workspace's expansion is saved with the window.
 

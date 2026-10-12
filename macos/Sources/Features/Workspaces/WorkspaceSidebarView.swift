@@ -208,7 +208,7 @@ private struct WorkspaceListView: View {
     /// The displayed workspaces' slots, each as tall as its group.
     private static func slots(of model: WorkspaceModel, heights: GroupHeights) -> ReorderSlots {
         ReorderSlots(lengths: displayedWorkspaces(of: model).map {
-            heights[$0.id] ?? SidebarMetrics.rowHeight + SidebarMetrics.gap
+            heights[$0.id] ?? SidebarMetrics.rowHeight + SidebarMetrics.groupGap
         })
     }
 
@@ -402,7 +402,7 @@ private struct WorkspaceGroup: View {
                     .transition(.opacity)
             }
         }
-        .padding(.bottom, tabs.isEmpty ? 0 : SidebarMetrics.gap)
+        .padding(.bottom, tabs.isEmpty ? 0 : SidebarMetrics.tabsBottomInset)
         // A drop target is filled with the accent color, like Finder's.
         .foregroundStyle(isDropTarget ? Color.white : Color.primary)
         .background {
@@ -411,7 +411,7 @@ private struct WorkspaceGroup: View {
                 .animation(SidebarMetrics.hoverFade, value: hovering)
         }
         .onHover { hovering = $0 }
-        .padding(.bottom, SidebarMetrics.gap)
+        .padding(.bottom, SidebarMetrics.groupGap)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(name)
     }
@@ -420,10 +420,6 @@ private struct WorkspaceGroup: View {
 
     private var header: some View {
         HStack(spacing: SidebarMetrics.spacing) {
-            Image(systemName: "rectangle.stack")
-                .imageScale(.large)
-                .foregroundStyle(isDropTarget ? Color.white : Color.accentColor)
-                .frame(width: SidebarMetrics.iconWidth)
             if isRenaming {
                 InlineTitleField("Workspace Name", title: name) {
                     controller.value?.endRenamingWorkspace(workspace.id, name: $0)
@@ -529,7 +525,6 @@ private struct WorkspaceGroup: View {
             DragGesture(minimumDistance: 0).onChanged { _ in press(tab) },
             including: isRenaming ? .subviews : .all)
         .contextMenu { TabContextMenu(tab: tab, model: model, controller: controller, inSidebar: true) }
-        .padding(.leading, SidebarMetrics.tabIndent)
     }
 
     /// Pressing a tab selects it right away, as in the tab strip.
@@ -649,15 +644,17 @@ private enum SidebarMetrics {
     /// The height of a header or tab row.
     static let rowHeight: CGFloat = 32
 
-    /// The space below a group, and below its last tab inside it.
-    static let gap: CGFloat = 2
+    /// The space after a group, which sets each workspace's tabs apart from
+    /// the next workspace now that they aren't indented.
+    static let groupGap: CGFloat = 8
 
-    /// A row's content inset, and the header icon's width and spacing. Tabs
-    /// are indented so their icons line up with the workspace's name.
+    /// The space below a group's last tab, inside its hover tint.
+    static let tabsBottomInset: CGFloat = 2
+
+    /// A row's content inset, and the space between its items. Tab rows
+    /// aren't indented: a workspace's name lines up with its tabs' icons.
     static let rowInset: CGFloat = 8.5
-    static let iconWidth: CGFloat = 20
     static let spacing: CGFloat = 6.5
-    static let tabIndent = iconWidth + spacing
 
     /// The chevron's and close buttons' glyph size and hover circle:
     /// larger than the tab strip's, for the taller rows.
