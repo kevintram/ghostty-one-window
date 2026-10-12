@@ -385,37 +385,14 @@ extension TerminalController {
     }
 
     /// Closes the tabs after the tab in its workspace: to its right in the
-    /// tab strip, or below it in the sidebar, as `direction` words it for
-    /// the confirmation and Undo.
-    func closeTabs(after tab: TerminalTab, direction: TabDirection = .right) {
+    /// tab strip, or below it in the sidebar, as `list` words it for the
+    /// confirmation and Undo.
+    func closeTabs(after tab: TerminalTab, in list: WorkspaceModel.TabList = .strip) {
         close(
             workspaceModel.tabs(rightOf: tab),
             showing: tab,
-            actionName: "Close Tabs \(direction.title)",
-            informativeText: "At least one tab \(direction.phrase) still has a running process. If you close the tab the process will be killed.")
-    }
-
-    /// Where the tabs after a tab are, as the tab strip or sidebar shows
-    /// them.
-    enum TabDirection {
-        case right
-        case below
-
-        /// As in a menu item or action name.
-        var title: String {
-            switch self {
-            case .right: "to the Right"
-            case .below: "Below"
-            }
-        }
-
-        /// As in a sentence.
-        var phrase: String {
-            switch self {
-            case .right: "to the right"
-            case .below: "below"
-            }
-        }
+            actionName: "Close Tabs \(list.afterTitle)",
+            informativeText: "At least one tab \(list.afterPhrase) still has a running process. If you close the tab the process will be killed.")
     }
 
     /// Closes several tabs as one action, asking once, titled after the
@@ -768,11 +745,11 @@ extension TerminalController {
 
     // MARK: Renaming
 
-    /// Starts renaming a tab in place: in the tab strip, which shows while
-    /// it is, or in the sidebar.
-    func beginRenamingTab(_ tab: TerminalTab, inSidebar: Bool = false) {
+    /// Starts renaming a tab in place in `list`: the tab strip, which shows
+    /// while it is, or the sidebar.
+    func beginRenamingTab(_ tab: TerminalTab, in list: WorkspaceModel.TabList = .strip) {
         guard workspaceModel.contains(tab) else { return }
-        workspaceModel.renaming = inSidebar ? .sidebarTab(tab.id) : .tab(tab.id)
+        workspaceModel.renaming = list.renaming(tab.id)
     }
 
     /// Sets a tab's title override. The shown tab's goes through the
@@ -788,8 +765,8 @@ extension TerminalController {
     /// Ends renaming a tab in the tab strip or sidebar, setting its title to
     /// `title`, or leaving it if nil (cancelled). An empty title restores
     /// the terminal's own. Keyboard focus goes back to the terminal.
-    func endRenamingTab(_ tab: TerminalTab, title: String?, inSidebar: Bool = false) {
-        endRenaming(inSidebar ? .sidebarTab(tab.id) : .tab(tab.id))
+    func endRenamingTab(_ tab: TerminalTab, title: String?, in list: WorkspaceModel.TabList = .strip) {
+        endRenaming(list.renaming(tab.id))
         if let title { setTitleOverride(title.isEmpty ? nil : title, of: tab) }
     }
 

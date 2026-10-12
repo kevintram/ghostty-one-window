@@ -155,6 +155,39 @@ final class WorkspaceModel: ObservableObject {
 
     @Published var renaming: Renaming?
 
+    /// Where a window lists tabs: the selected workspace's across the tab
+    /// strip, or every expanded workspace's down the sidebar. Renaming a tab
+    /// edits it where it was chosen, and actions on the tabs after it are
+    /// worded for the list's direction.
+    enum TabList {
+        case strip
+        case sidebar
+
+        /// Renaming the tab in this list.
+        func renaming(_ tab: UUID) -> Renaming {
+            switch self {
+            case .strip: .tab(tab)
+            case .sidebar: .sidebarTab(tab)
+            }
+        }
+
+        /// Where the tabs after a tab are, as in a menu item or action name.
+        var afterTitle: String {
+            switch self {
+            case .strip: "to the Right"
+            case .sidebar: "Below"
+            }
+        }
+
+        /// Where the tabs after a tab are, as in a sentence.
+        var afterPhrase: String {
+            switch self {
+            case .strip: "to the right"
+            case .sidebar: "below"
+            }
+        }
+    }
+
     /// An item being dragged to reorder it, a tab in the tab strip or a
     /// workspace in the sidebar, and how far it's been dragged.
     struct ReorderDrag: Equatable {

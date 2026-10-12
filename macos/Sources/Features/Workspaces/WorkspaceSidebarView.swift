@@ -492,9 +492,7 @@ private struct WorkspaceGroup: View {
             controller.value?.beginRenamingWorkspace(workspace.id)
         }
         Divider()
-        Button("Close Workspace") {
-            controller.value?.close(workspace: workspace.id)
-        }
+        Button("Close Workspace", action: close)
         Button("Close Other Workspaces") {
             controller.value?.closeOtherWorkspaces(than: workspace.id)
         }
@@ -512,13 +510,13 @@ private struct WorkspaceGroup: View {
     // MARK: Tabs
 
     private func tabRow(_ tab: TerminalTab) -> some View {
-        let isRenaming = model.renaming == .sidebarTab(tab.id)
+        let isRenaming = model.renaming == WorkspaceModel.TabList.sidebar.renaming(tab.id)
         return WorkspaceTabRow(
             tab: tab,
             isSelected: tab === shownTab,
             isRenaming: isRenaming
         ) { title in
-            controller.value?.endRenamingTab(tab, title: title, inSidebar: true)
+            controller.value?.endRenamingTab(tab, title: title, in: .sidebar)
         } select: {
             controller.value?.selectTab(tab)
         } close: {
@@ -528,7 +526,7 @@ private struct WorkspaceGroup: View {
         .gesture(
             DragGesture(minimumDistance: 0).onChanged { _ in press(tab) },
             including: isRenaming ? .subviews : .all)
-        .contextMenu { TabContextMenu(tab: tab, model: model, controller: controller, inSidebar: true) }
+        .contextMenu { TabContextMenu(tab: tab, model: model, controller: controller, list: .sidebar) }
     }
 
     /// Pressing a tab selects it right away, as in the tab strip.
@@ -538,7 +536,7 @@ private struct WorkspaceGroup: View {
         guard let press = NSApp.currentEvent, press.type == .leftMouseDown else { return }
         controller.value?.selectTab(tab)
         if press.clickCount == 2 {
-            controller.value?.beginRenamingTab(tab, inSidebar: true)
+            controller.value?.beginRenamingTab(tab, in: .sidebar)
         }
     }
 }

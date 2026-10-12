@@ -103,6 +103,15 @@ struct WorkspaceModelTests {
         #expect(model.renaming == nil)
     }
 
+    @Test func tabListsRenameInPlaceAndWordTheTabsAfter() {
+        let id = UUID()
+
+        #expect(WorkspaceModel.TabList.strip.renaming(id) == .tab(id))
+        #expect(WorkspaceModel.TabList.sidebar.renaming(id) == .sidebarTab(id))
+        #expect(WorkspaceModel.TabList.strip.afterTitle == "to the Right")
+        #expect(WorkspaceModel.TabList.sidebar.afterPhrase == "below")
+    }
+
     private func makeModel() -> (WorkspaceModel, [Workspace], [TerminalTab]) {
         let model = WorkspaceModel()
         let tabs = (0..<3).map { _ in TerminalTab(surfaceTree: .init()) }

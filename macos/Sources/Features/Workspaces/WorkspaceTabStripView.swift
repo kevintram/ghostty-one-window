@@ -374,23 +374,19 @@ struct TabContextMenu: View {
     let model: WorkspaceModel
     let controller: Weak<TerminalController>
 
-    /// Whether the menu is for a tab listed down the sidebar, rather than
-    /// across the strip. Renaming it renames it there.
-    var inSidebar = false
-
-    private var direction: TerminalController.TabDirection {
-        inSidebar ? .below : .right
-    }
+    /// Where the tab is listed, which its actions are worded for, and where
+    /// renaming it renames it.
+    var list = WorkspaceModel.TabList.strip
 
     var body: some View {
         let otherWorkspaces = model.workspaces.filter { !$0.tabs.contains { $0 === tab } }
 
-        Button("New Tab \(direction.title)") {
+        Button("New Tab \(list.afterTitle)") {
             controller.value?.newTab(after: tab)
         }
         Divider()
         Button("Rename Tab…") {
-            controller.value?.beginRenamingTab(tab, inSidebar: inSidebar)
+            controller.value?.beginRenamingTab(tab, in: list)
         }
         Menu("Move to Workspace") {
             ForEach(otherWorkspaces) { workspace in
@@ -415,8 +411,8 @@ struct TabContextMenu: View {
             controller.value?.closeOtherTabs(than: tab)
         }
         .disabled(model.otherTabs(than: tab).isEmpty)
-        Button("Close Tabs \(direction.title)") {
-            controller.value?.closeTabs(after: tab, direction: direction)
+        Button("Close Tabs \(list.afterTitle)") {
+            controller.value?.closeTabs(after: tab, in: list)
         }
         .disabled(model.tabs(rightOf: tab).isEmpty)
     }
