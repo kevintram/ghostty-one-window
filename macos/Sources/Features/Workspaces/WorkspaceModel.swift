@@ -471,6 +471,22 @@ final class WorkspaceModel: ObservableObject {
         workspaces[index].isExpanded.toggle()
     }
 
+    /// Whether any workspace would change if every workspace were expanded,
+    /// or collapsed.
+    func canSetAllExpanded(_ isExpanded: Bool) -> Bool {
+        workspaces.contains { $0.isExpanded != isExpanded }
+    }
+
+    /// Expands or collapses every workspace in the sidebar, as one change.
+    func setAllExpanded(_ isExpanded: Bool) {
+        guard canSetAllExpanded(isExpanded) else { return }
+        workspaces = workspaces.map { workspace in
+            var workspace = workspace
+            workspace.isExpanded = isExpanded
+            return workspace
+        }
+    }
+
     func moveWorkspace(_ id: UUID, to index: Int) {
         guard let from = workspaceIndex(of: id), workspaces.indices.contains(index) else { return }
         workspaces.insert(workspaces.remove(at: from), at: index)

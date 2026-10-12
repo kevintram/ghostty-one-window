@@ -1225,6 +1225,12 @@ extension TerminalController {
         case #selector(renameWorkspace), #selector(closeWorkspace), #selector(selectWorkspaceByNumber):
             return supportsTabs
 
+        case #selector(expandAllWorkspaces):
+            return supportsTabs && workspaceModel.canSetAllExpanded(true)
+
+        case #selector(collapseAllWorkspaces):
+            return supportsTabs && workspaceModel.canSetAllExpanded(false)
+
         case #selector(returnToDefaultSize):
             guard let window else { return false }
 

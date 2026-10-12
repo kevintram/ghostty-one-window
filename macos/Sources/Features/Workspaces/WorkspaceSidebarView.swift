@@ -17,13 +17,56 @@ struct WorkspaceSidebarView: View {
 
     var body: some View {
         // Keep the hosting root unmodified: drag-out lookup uses this view type.
-        WorkspaceListView(model: model, controller: controller, topInset: insets.top)
-            .coordinatedHoverTooltips(using: tooltip)
-            .background {
-                Color(nsColor: .windowBackgroundColor)
-                    .opacity(Self.backgroundOpacity)
-                    .ignoresSafeArea()
-            }
+        VStack(spacing: 0) {
+            WorkspaceListView(model: model, controller: controller, topInset: insets.top)
+            WorkspaceSidebarFooter(model: model, controller: controller)
+        }
+        .coordinatedHoverTooltips(using: tooltip)
+        .background {
+            Color(nsColor: .windowBackgroundColor)
+                .opacity(Self.backgroundOpacity)
+                .ignoresSafeArea()
+        }
+    }
+}
+
+extension WorkspaceSidebarView {
+    /// How workspaces expand and collapse, for changes made from outside the
+    /// sidebar, such as the menu's Expand All Workspaces.
+    static let expansion = SidebarMetrics.expansion
+}
+
+/// Under the workspace list, which scrolls above it: buttons that expand or
+/// collapse every workspace, each disabled while it would change nothing.
+private struct WorkspaceSidebarFooter: View {
+    @ObservedObject var model: WorkspaceModel
+    let controller: Weak<TerminalController>
+
+    var body: some View {
+        HStack(spacing: 2) {
+            button("Expand All Workspaces", systemImage: "rectangle.expand.vertical", expanding: true)
+            button("Collapse All Workspaces", systemImage: "rectangle.compress.vertical", expanding: false)
+            Spacer(minLength: 0)
+        }
+        // The first button centered under the workspaces' icons.
+        .padding(.horizontal, SidebarMetrics.listInset + SidebarMetrics.rowInset
+            + (SidebarMetrics.iconWidth - Self.buttonSize) / 2)
+        .frame(height: SidebarMetrics.rowHeight + 8)
+    }
+
+    private static let buttonSize: CGFloat = 24
+
+    private func button(_ title: String, systemImage: String, expanding: Bool) -> some View {
+        Button {
+            controller.value?.setAllWorkspacesExpanded(expanding)
+        } label: {
+            Image(systemName: systemImage)
+                .frame(width: Self.buttonSize, height: Self.buttonSize)
+        }
+        .buttonStyle(HoverCircleButtonStyle())
+        .disabled(!model.canSetAllExpanded(expanding))
+        .hoverTooltip(title)
+        .accessibilityLabel(title)
     }
 }
 
@@ -106,7 +149,7 @@ private struct WorkspaceListView: View {
                     }
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, SidebarMetrics.listInset)
             .padding(.top, topInset)
         }
         .ignoresSafeArea(.container, edges: .top)
@@ -484,7 +527,14 @@ private struct WorkspaceGroup: View {
     /// Expands or collapses the workspace, pointing down while it's
     /// expanded and to the side while it's collapsed.
     private var chevron: some View {
-        Button(action: toggleExpanded) {
+        Button {
+            // Option-clicking it expands or collapses every workspace.
+            if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
+                controller.value?.setAllWorkspacesExpanded(!workspace.isExpanded)
+            } else {
+                toggleExpanded()
+            }
+        } label: {
             Image(systemName: "chevron.down")
                 .font(.system(size: SidebarMetrics.glyphSize, weight: .bold))
                 .rotationEffect(.degrees(workspace.isExpanded ? 0 : -90))
@@ -660,6 +710,9 @@ private struct SidebarRowBackground: View {
 private enum SidebarMetrics {
     /// The height of a header or tab row.
     static let rowHeight: CGFloat = 32
+
+    /// The space between the sidebar's edges and its groups.
+    static let listInset: CGFloat = 10
 
     /// The space after a group, which sets each workspace's tabs apart from
     /// the next workspace now that they aren't indented.

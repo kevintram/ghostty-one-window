@@ -141,8 +141,11 @@ the tab strip shows the selected workspace's tabs anyway. Clicking anywhere
 else on a header selects its workspace, or if it's already selected, expands
 or collapses it like the chevron. That happens on release, and not when the
 press drags the workspace. Every click counts, so quick clicks toggle it back
-and forth. Workspaces start collapsed, and each workspace's expansion is saved
-with the window.
+and forth. Option-clicking a chevron expands or collapses every workspace, and
+so do Expand All and Collapse All buttons pinned under the list, and the
+Workspace menu's Expand All Workspaces and Collapse All Workspaces; each is
+disabled while it would change nothing. Workspaces start collapsed, and each
+workspace's expansion is saved with the window.
 
 Only one row is highlighted, as Liquid Glass like the strip's selected tab:
 the tab shown in the window, or while its workspace is collapsed, the
@@ -275,6 +278,7 @@ Control in place of Command.
 | Close Window | `Control-Command-W` | `close_window` | Close the application window, including every workspace in it. |
 | Close All Windows | `Command-Option-Shift-W` | `close_all_windows` | Close every window. |
 | Merge All Windows | None (Window menu) | — | Move every other window's workspaces into this one. |
+| Expand / Collapse All Workspaces | None (Workspace menu, sidebar) | — | Expand or collapse every workspace in the sidebar. |
 | Move Tab to New Window | None (menus) | `move_tab_to_new_window` | Move the shown tab into a new window. |
 | New Workspace | `Command-N` | `new_workspace` | Create and select a workspace containing one new tab. |
 | Close Workspace | `Command-Shift-W` | `close_workspace` | Close the selected workspace and all of its tabs (8). |
@@ -615,6 +619,7 @@ Implemented:
   with New Workspace and the sidebar toggle.
 - Tab strip with titles, selection, close on hover, and New Tab; hidden for a
   single tab.
+- Expanding and collapsing every workspace at once (6.1).
 - Expandable workspaces in the sidebar listing their tabs (6.1), with
   selecting, renaming, closing, and context menus for tab rows; expansion is
   saved for restoration.

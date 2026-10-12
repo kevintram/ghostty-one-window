@@ -3,7 +3,7 @@ import SwiftUI
 /// The glyph buttons of the tab strip and sidebar (new tab, close). Muted
 /// at rest, the glyph brightens while hovered and a circle filling the
 /// label's frame appears behind it, marking its hit area, and darkens while
-/// pressed.
+/// pressed. Disabled, the glyph is faint and doesn't respond to hover.
 struct HoverCircleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         HoverCircleButton(configuration: configuration)
@@ -12,11 +12,12 @@ struct HoverCircleButtonStyle: ButtonStyle {
     private struct HoverCircleButton: View {
         let configuration: Configuration
 
+        @Environment(\.isEnabled) private var isEnabled
         @State private var hovering = false
 
         var body: some View {
             configuration.label
-                .foregroundStyle(hovering ? .primary : .secondary)
+                .foregroundStyle(!isEnabled ? .tertiary : hovering ? .primary : .secondary)
                 .background(Circle().fill(Color.primary.opacity(circleOpacity)))
                 .contentShape(Circle())
                 .onHover { hovering = $0 }
@@ -24,6 +25,7 @@ struct HoverCircleButtonStyle: ButtonStyle {
         }
 
         private var circleOpacity: Double {
+            guard isEnabled else { return 0 }
             if configuration.isPressed { return 0.2 }
             return hovering ? 0.12 : 0
         }

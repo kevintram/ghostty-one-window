@@ -103,6 +103,22 @@ struct WorkspaceModelTests {
         #expect(model.renaming == nil)
     }
 
+    @Test func expandsAndCollapsesEveryWorkspaceAtOnce() {
+        let (model, workspaces, _) = makeModel()
+        model.toggleExpanded(ofWorkspace: workspaces[1].id)
+
+        #expect(model.canSetAllExpanded(true))
+        #expect(model.canSetAllExpanded(false))
+
+        model.setAllExpanded(true)
+        #expect(model.workspaces.map(\.isExpanded) == [true, true, true])
+        #expect(!model.canSetAllExpanded(true))
+
+        model.setAllExpanded(false)
+        #expect(model.workspaces.map(\.isExpanded) == [false, false, false])
+        #expect(!model.canSetAllExpanded(false))
+    }
+
     @Test func tabListsRenameInPlaceAndWordTheTabsAfter() {
         let id = UUID()
 

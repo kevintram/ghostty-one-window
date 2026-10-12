@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import SwiftUI
 
 // A window holds the tabs of all of its workspaces in its `workspaceModel`.
 // Only the selected tab's split tree is in the window: it's the controller's
@@ -802,7 +803,23 @@ extension TerminalController {
         if let focusedSurface { window?.makeFirstResponder(focusedSurface) }
     }
 
+    // MARK: Expanding
+
+    /// Expands or collapses every workspace in the sidebar, sliding them
+    /// together.
+    func setAllWorkspacesExpanded(_ isExpanded: Bool) {
+        withAnimation(WorkspaceSidebarView.expansion) { workspaceModel.setAllExpanded(isExpanded) }
+    }
+
     // MARK: First Responder
+
+    @IBAction func expandAllWorkspaces(_ sender: Any?) {
+        setAllWorkspacesExpanded(true)
+    }
+
+    @IBAction func collapseAllWorkspaces(_ sender: Any?) {
+        setAllWorkspacesExpanded(false)
+    }
 
     /// Renames the selected workspace.
     @IBAction func renameWorkspace(_ sender: Any?) {
