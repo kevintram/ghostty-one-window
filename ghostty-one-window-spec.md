@@ -146,9 +146,11 @@ with the window.
 
 Only one row is highlighted, as Liquid Glass like the strip's selected tab:
 the tab shown in the window, or while its workspace is collapsed, the
-workspace's header. Hovering a group highlights all of it; hovering its
-header or a tab highlights that row too and shows its close button, which
-takes no room from the name while hidden.
+workspace's header. The selected workspace's whole group is also tinted, so it
+stands out while it's expanded too, and VoiceOver reads its header as the
+current workspace. Hovering a group tints all of it, the selected one more
+deeply; hovering its header or a tab highlights that row too and shows its
+close button, which takes no room from the name while hidden.
 
 A tab row acts like the tab in the strip: pressing it selects it,
 double-clicking or Rename Tab… in its context menu renames it in place in

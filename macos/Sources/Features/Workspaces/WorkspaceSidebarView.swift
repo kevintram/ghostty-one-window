@@ -346,9 +346,9 @@ extension WorkspaceListView: DropDelegate {
 }
 
 /// A workspace in the sidebar: a header with its name, then its tabs while
-/// it's expanded. The selected workspace highlights the tab shown in the
-/// window, or while collapsed, its header in that tab's place. Hovering the
-/// group highlights all of it.
+/// it's expanded. The selected workspace's group is tinted, and it
+/// highlights the tab shown in the window, or while collapsed, its header in
+/// that tab's place. Hovering a group tints all of it.
 private struct WorkspaceGroup: View {
     let workspace: Workspace
 
@@ -378,10 +378,19 @@ private struct WorkspaceGroup: View {
         model.renaming == .workspace(workspace.id)
     }
 
+    /// Whether this is the selected workspace, whose tab the window shows.
+    private var isActive: Bool { shownTab != nil }
+
     /// Whether the header is highlighted as selected: the workspace is
     /// selected, but collapsed, so the tab shown isn't listed.
     private var isHeaderSelected: Bool {
-        shownTab != nil && !workspace.isExpanded && !isDropTarget
+        isActive && !workspace.isExpanded && !isDropTarget
+    }
+
+    /// The tint behind the group: the selected workspace's, so it stands out
+    /// even while it's expanded, plus more while hovered.
+    private var groupTintOpacity: Double {
+        (isActive ? SidebarMetrics.activeGroupOpacity : 0) + (hovering ? SidebarMetrics.groupHoverOpacity : 0)
     }
 
     /// The tabs listed under the header. A tab dragged out of the tab strip
@@ -407,8 +416,8 @@ private struct WorkspaceGroup: View {
         .foregroundStyle(isDropTarget ? Color.white : Color.primary)
         .background {
             RoundedRectangle(cornerRadius: 10)
-                .fill(isDropTarget ? Color.accentColor : Color.primary.opacity(hovering ? SidebarMetrics.groupHoverOpacity : 0))
-                .animation(SidebarMetrics.hoverFade, value: hovering)
+                .fill(isDropTarget ? Color.accentColor : Color.primary.opacity(groupTintOpacity))
+                .animation(SidebarMetrics.hoverFade, value: groupTintOpacity)
         }
         .onHover { hovering = $0 }
         .padding(.bottom, SidebarMetrics.groupGap)
@@ -458,13 +467,18 @@ private struct WorkspaceGroup: View {
         // One button for VoiceOver, except while renaming, when the name
         // field must stay reachable.
         .accessibilityElement(children: isRenaming ? .contain : .combine)
-        .accessibilityValue(workspace.isExpanded ? "Expanded" : "Collapsed")
+        .accessibilityValue(isActive ? "Current workspace, \(expansionState)" : expansionState)
         // Selected, like the highlight, only while the shown tab isn't listed.
         .accessibilityAddTraits(isRenaming ? [] : isHeaderSelected ? [.isButton, .isSelected] : .isButton)
         // Pointer selection happens in the list's drag gesture, on press.
         .accessibilityAction { controller.value?.selectWorkspace(workspace.id) }
         .accessibilityAction(named: workspace.isExpanded ? "Collapse" : "Expand", toggleExpanded)
         .accessibilityAction(named: "Close Workspace", close)
+    }
+
+    /// The workspace's expansion, as VoiceOver reads it.
+    private var expansionState: String {
+        workspace.isExpanded ? "Expanded" : "Collapsed"
     }
 
     /// Expands or collapses the workspace, pointing down while it's
@@ -666,8 +680,10 @@ private enum SidebarMetrics {
     static let glyphSize: CGFloat = 11
     static let glyphButtonSize: CGFloat = 20
 
-    /// The tint over a hovered group.
+    /// The tint over a hovered group, and over the selected workspace's,
+    /// which hovering adds to.
     static let groupHoverOpacity = 0.05
+    static let activeGroupOpacity = 0.1
 
     static let hoverFade = Animation.easeOut(duration: 0.12)
     static let expansion = Animation.easeOut(duration: 0.15)
