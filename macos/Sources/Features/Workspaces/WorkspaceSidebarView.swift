@@ -420,6 +420,10 @@ private struct WorkspaceGroup: View {
 
     private var header: some View {
         HStack(spacing: SidebarMetrics.spacing) {
+            Image(systemName: "rectangle.stack")
+                .imageScale(.large)
+                .foregroundStyle(isDropTarget ? Color.white : Color.accentColor)
+                .frame(width: SidebarMetrics.iconWidth)
             if isRenaming {
                 InlineTitleField("Workspace Name", title: name) {
                     controller.value?.endRenamingWorkspace(workspace.id, name: $0)
@@ -558,6 +562,7 @@ private struct WorkspaceTabRow: View {
         HStack(spacing: SidebarMetrics.spacing) {
             Image(systemName: "terminal.fill")
                 .foregroundStyle(.secondary)
+                .frame(width: SidebarMetrics.iconWidth)
                 .accessibilityHidden(true)
             if isRenaming {
                 // Starts from the title set by renaming, if any, rather than
@@ -651,9 +656,11 @@ private enum SidebarMetrics {
     /// The space below a group's last tab, inside its hover tint.
     static let tabsBottomInset: CGFloat = 2
 
-    /// A row's content inset, and the space between its items. Tab rows
-    /// aren't indented: a workspace's name lines up with its tabs' icons.
+    /// A row's content inset, its icon's width, and the space between its
+    /// items. Tab rows aren't indented; headers and tabs give their icons
+    /// the same width, so the icons line up, and so do names and titles.
     static let rowInset: CGFloat = 8.5
+    static let iconWidth: CGFloat = 20
     static let spacing: CGFloat = 6.5
 
     /// The chevron's and close buttons' glyph size and hover circle:
